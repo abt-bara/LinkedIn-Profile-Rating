@@ -6,4 +6,7 @@
     It would be better to <code>git clone</code> the project and start working on the
     <a href="./Backend/">AI Service Directory</a>.
   </p>
+  <p style="font-size: 1.1rem; line-height: 1.7; margin: 0.75rem 0 0;">
+    Each folder contains its own documentation, including API contracts, project structure, development stack, and descriptions.
+  </p>
 </div>
