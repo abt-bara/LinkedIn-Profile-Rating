@@ -1,4 +1,9 @@
-﷽<br>
-Conception pending:<br>
-we will soon configure readme file for all the project details.
-it would be better to `git clone` the project and start working on the [AI Service Directory](./Backend/)
+<div align="center">
+  <h1 style="font-size: 3.5rem; margin: 0;">﷽</h1>
+  <p style="font-size: 2rem; margin: 0.5rem 0 1rem;">Conception pending:</p>
+  <p style="font-size: 1.2rem; line-height: 1.7; margin: 0;">
+    We will soon configure the README file with all project details.<br>
+    It would be better to <code>git clone</code> the project and start working on the
+    <a href="./Backend/">AI Service Directory</a>.
+  </p>
+</div>
