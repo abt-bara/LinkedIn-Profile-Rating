@@ -1,22 +1,41 @@
 <div align="center">
-  <h1 style="font-size: 3.5rem; margin: 0;">بسم الله الرحمان الرحيم</h1>
-  <p style="font-size: 2rem; margin: 0.5rem 0 1rem;">Conception pending:</p>
-  <p style="font-size: 1.2rem; line-height: 1.7; margin: 0;">
-    We will soon configure the README file with all project details.<br>
-    It would be better to <code>git clone</code> the project and start working on the
-    <a href="./Backend/">AI Service Directory</a>.
-  </p><Br>
-  
-  <p style="font-size: 1.1rem; line-height: 1.7; margin: 0.75rem 0 0;">
-    Each folder contains its own documentation, including API contracts, project structure, development stack, and descriptions.
-  </p>
-  <h3>— Backend Composition —</h3>
-  <p>
-  The backend is made of 3 main folders :
-  <h3> (The ai server )["./Backend/ai server"] :
-  contains the ai models and communicates with both the auth and 
-  - (The auth server )["./Backend/auth server"]
-  - (The gateway )["./Backend/auth server"]
-
-  </p>
+  <h1>بسم الله الرحمن الرحيم</h1>
 </div>
+
+# LinkedIn Profile Rater
+
+A web application for reviewing LinkedIn profiles. The repository contains a
+React frontend and backend service projects; frontend routing and protected-page
+navigation are being developed independently of backend session verification.
+
+## Repository layout
+
+- [`frontend/`](./frontend/): Vite, React, and TypeScript application.
+- [`Backend/`](./Backend/): backend service projects and their documentation.
+- [`docs/`](./docs/): application diagrams and supporting documentation.
+
+## Frontend quick start
+
+```sh
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+The app is served locally by Vite. See the [frontend README](./frontend/README.md)
+for available routes, the live API endpoints, and how to configure the gateway
+URL. The default gateway URL is `http://localhost:3000`.
+
+## Project status
+
+The frontend includes an authentication page and a protected profile-review
+page. Authentication tokens are not stored in `localStorage`: the intended
+session mechanism uses a server-managed `HttpOnly` cookie, which browser
+JavaScript cannot read. The frontend auth provider checks the current user
+through the session endpoint. Profile metrics and uploaded PDF analysis use the
+live gateway endpoints; the frontend does not substitute sample data if the
+backend is unavailable. The route guard is a navigation aid, not a security
+boundary. Backend access control must be enforced by the server, which should
+set the cookie with `HttpOnly`, `Secure` in production, and an appropriate
+`SameSite` policy.

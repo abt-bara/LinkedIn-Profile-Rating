@@ -1,6 +1,101 @@
 @import '../Css-template.css';
 
 :root {
+  --jade-50: #f3f8fc;
+  --jade-100: #e8f3ff;
+  --jade-200: #cce4f7;
+  --jade-300: #9dc9ed;
+  --jade-400: #70b5f9;
+  --jade-500: #378fe9;
+  --jade-600: #0a66c2;
+  --jade-700: #004182;
+  --jade-800: #0a3358;
+  --jade-900: #082747;
+  --jade-950: #071d2b;
+
+  --teal-50: #f0f8ff;
+  --teal-100: #dceeff;
+  --teal-200: #b7dcf8;
+  --teal-300: #8bc7f0;
+  --teal-400: #5daee5;
+  --teal-500: #378fe9;
+  --teal-600: #2867b2;
+  --teal-700: #155a9c;
+  --teal-800: #104979;
+  --teal-900: #0b3558;
+  --teal-950: #072542;
+
+  --gold-50: #f3f8fc;
+  --gold-100: #e8f3ff;
+  --gold-200: #cce4f7;
+  --gold-300: #9dc9ed;
+  --gold-400: #70b5f9;
+  --gold-500: #378fe9;
+  --gold-600: #0a66c2;
+  --gold-700: #004182;
+  --gold-800: #0a3358;
+  --gold-900: #082747;
+  --gold-950: #071d2b;
+
+  --lapis-50: #f3f8fc;
+  --lapis-100: #e8f3ff;
+  --lapis-200: #cce4f7;
+  --lapis-300: #9dc9ed;
+  --lapis-400: #70b5f9;
+  --lapis-500: #378fe9;
+  --lapis-600: #0a66c2;
+  --lapis-700: #004182;
+  --lapis-800: #0a3358;
+  --lapis-900: #082747;
+  --lapis-950: #071d2b;
+
+  --sand-50: #f3f6f8;
+  --sand-100: #e8eef3;
+  --sand-200: #d6e2ec;
+  --sand-300: #bfd1e1;
+  --sand-400: #9fb6ca;
+  --sand-500: #7892a8;
+  --sand-600: #5f7488;
+  --sand-700: #46596c;
+  --sand-800: #2f4154;
+  --sand-900: #1c2b3a;
+  --sand-950: #102030;
+  --stone-50: #f5f8fb;
+  --stone-100: #eaf0f6;
+  --stone-200: #d9e3ed;
+  --stone-300: #c3d0dd;
+  --stone-400: #9eafbf;
+  --stone-500: #74869a;
+  --stone-600: #586d82;
+  --stone-700: #40566b;
+  --stone-800: #2c4257;
+  --stone-900: #182f45;
+  --stone-950: #0e1f31;
+  --ivory: #f3f6f8;
+  --ink: #191919;
+  --heading: #191919;
+  --muted: #666666;
+  --surface: #ffffff;
+  --surface-raised: #f3f8fc;
+  --outline: #dce6f1;
+  --success: #0a66c2;
+  --info: #0a66c2;
+  --profile-success: #0a66c2;
+  --jade-glow: 0 0 24px rgba(10, 102, 194, 0.28);
+  --gold-glow: 0 0 24px rgba(55, 143, 233, 0.24);
+  --lattice-line: rgba(10, 102, 194, 0.1);
+  --pattern-color: rgba(10, 102, 194, 0.12);
+
+  --profile-blue: #0a66c2;
+  --profile-blue-dark: #004182;
+  --profile-blue-pale: #e8f3ff;
+  --profile-canvas: #f3f6f8;
+  --profile-ink: #191919;
+  --profile-muted: #666666;
+  --profile-border: #dce6f1;
+  --profile-border-strong: #c9d8e6;
+  --profile-shadow: 0 12px 30px rgba(10, 44, 80, 0.12);
+
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--profile-ink);
   background: var(--profile-canvas);
@@ -31,11 +126,11 @@ input {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(47, 111, 183, 0.35);
+  outline: 3px solid rgba(10, 102, 194, 0.35);
   outline-offset: 3px;
 }
 
 ::selection {
-  color: #173a61;
-  background: #d7e9fc;
+  color: #004182;
+  background: #cce4f7;
 }

@@ -1,82 +1,90 @@
-# LinkedIn Profile Rater frontend
+# Frontend
 
-The frontend is a React + TypeScript application built with Vite. Its API calls
-are isolated in service classes under `src/services/`; components do not depend
-on fetch details or backend hostnames.
+The frontend is a React and TypeScript single-page application built with Vite.
+It provides an authentication page and a protected profile-review page.
 
-For the full application flow, service boundaries, API assumptions, and
-implemented-versus-unverified behavior, see
-[APPLICATION_FLOW.md](../APPLICATION_FLOW.md).
+## Requirements
+
+- Node.js and npm
 
 ## Run locally
 
 ```sh
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-The development server forwards `/api/*` to `http://localhost:3000` by default.
-Set `VITE_API_PROXY_TARGET` in the environment to point Vite at the gateway:
+Vite prints the local development URL after startup. Other available commands:
+
+```sh
+npm run build
+npm run lint
+npm run preview
+```
+
+## Connect to the backend
+
+The frontend makes live requests; it does not include demo or fallback profile
+data. Vite forwards `/api/*` to the gateway URL configured by
+`VITE_API_PROXY_TARGET`. The default is `http://localhost:3000`.
+
+To start the frontend against a gateway running elsewhere, set the URL in
+`frontend/.env.local`:
+
+```dotenv
+VITE_API_PROXY_TARGET=http://localhost:8080
+```
+
+Then start Vite:
+
+```sh
+npm run dev
+```
+
+Or launch the frontend and set the gateway URL in one command:
 
 ```sh
 VITE_API_PROXY_TARGET=http://localhost:8080 npm run dev
 ```
 
-The browser only calls relative `/api/*` URLs. For production, configure the
-hosting server or gateway to reverse-proxy the same `/api/*` paths to the API;
-the Vite development proxy is not included in the production build.
+The current frontend API client expects:
 
-## Frontend flows
-
-- The profile review page accepts a LinkedIn profile URL only for a signed-in
-  user. If a signed-out visitor pastes a URL, it is retained in tab-scoped
-  session storage and a LinkedIn sign-in action is shown. After authentication,
-  the visitor can continue with the restored URL.
-- Profile URLs are validated as LinkedIn `/in/` or `/pub/` profile links before
-  the review request is sent.
-- Sign-in and account creation both use LinkedIn OAuth. The first successful
-  LinkedIn sign-in creates an account automatically when needed.
-- Magic-link generation and the returned URL are rendered only for a user
-  whose session role is `admin`.
-- Profile review responses are rendered recursively, with headings capped at
-  three levels.
-
-## Service and API assumptions
-
-`src/services/httpClient.ts` centralizes same-origin requests, cookie inclusion,
-and HTTP errors. `AuthService` owns authentication endpoints and `ProfileService`
-owns profile review and magic-link endpoints.
-
-The frontend currently expects the following gateway contract:
-
-| Method | Path | Expected behavior |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/auth/linkedin` | Start LinkedIn OAuth; on success, set the session cookie and redirect to `/`. |
-| `GET` | `/api/session` | Return the signed-in user (`id`, `username`, `role`); return `401` if no session exists. |
-| `POST` | `/api/signout` | Invalidate the current session. |
-| `GET` | `/api/profile-check?url=...` | Require an authenticated user and return the profile-review result. |
-| `POST` | `/api/magic-link` | Require an admin role and return a URL as text or as `{ "url": "..." }` / `{ "magicLink": "..." }`. |
+| `GET` | `/api/user` | Load the signed-in user using the session cookie. |
+| `POST` | `/api/auth` | Complete authentication and establish the session. |
+| `POST` | `/api/signout` | End the current session. |
+| `GET` | `/api/graph` | Load profile metrics for the dashboard. |
+| `POST` | `/api/Analyze` | Upload a PDF as multipart form data and return its analysis JSON. |
 
-QR rendering is not included in this first frontend pass; the admin flow
-currently displays the generated link. The service boundary keeps response
-handling isolated so a QR presentation can be added without changing the API
-client or authentication flows.
+These are the paths used by the current frontend client, not confirmation that
+the gateway implementation is available or running. The backend directories
+in this repository currently contain documentation only; start the gateway
+using its own project instructions or point `VITE_API_PROXY_TARGET` at an
+already-running gateway. A failed request is shown in the UI rather than
+replaced with sample data. In production, configure the hosting server to
+forward `/api/*` to the gateway and keep the session cookie secure.
 
-These are frontend integration assumptions, not a finalized backend design.
-Route names and payload shapes can be adjusted as the gateway contract is
-defined. Authentication cookies should be HttpOnly, Secure in production, and
-configured with an appropriate SameSite policy.
+## Routes and authentication
 
-The UI gate and admin-only control are usability measures, not security
-boundaries. The gateway must independently authenticate every protected
-request, enforce the admin role for magic-link generation, validate submitted
-URLs, and apply appropriate rate limits. The browser-visible `/api` path is
-not hidden; the proxy keeps the upstream host out of frontend source and
-provides a same-origin development path.
+- `/auth` displays the authentication page.
+- `/` displays the profile-review page after the existing auth provider confirms
+  a signed-in user.
+- Other paths display a not-found page.
 
-## Checks
+The frontend does not store or read authentication tokens in `localStorage`.
+The browser cannot access an `HttpOnly` cookie from JavaScript; the server sets
+and validates the session cookie, and the auth provider derives the current
+user from its session response. API requests include credentials. `ProtectedRoute`
+shows a loading or retry state while the session is checked and redirects
+visitors without a signed-in user to `/auth`.
 
-```sh
-npm run lint
-npm run build
-```
+The backend must set the session cookie with `HttpOnly`, `Secure` in
+production, and an appropriate `SameSite` policy, and enforce authorization on
+every protected API request. Frontend route protection is a navigation aid,
+not a security boundary. An application-level error boundary displays a
+recovery message for render errors.
+
+The app uses React Router for client-side navigation. The router is mounted in
+`src/main.tsx`, while route declarations live in `src/App.tsx`.

@@ -1,16 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import heroImage from '../assets/hero.png'
 import { useAuth } from '../auth/AuthContext'
 import { authService } from '../services/authService'
 
+function getSessionError(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null || !('sessionError' in state)) {
+    return null
+  }
+
+  return typeof state.sessionError === 'string' ? state.sessionError : null
+}
+
 export function AuthPage() {
-  const { user, loading } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { completeSignIn } = useAuth()
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  useEffect(() => {
-    if (!loading && user) window.location.replace('/')
-  }, [loading, user])
+  const sessionError = getSessionError(location.state)
 
   async function handleLinkedIn() {
     setError(null)
@@ -19,7 +28,8 @@ export function AuthPage() {
     try {
       const profile = await authService.authenticate('linkedin')
       if (profile) {
-        window.location.replace('/')
+        completeSignIn(profile)
+        navigate('/', { replace: true })
       }
     } catch (requestError) {
       setError(
@@ -35,13 +45,13 @@ export function AuthPage() {
   return (
     <main className="auth-layout">
       <section className="auth-panel">
-        <a className="brand auth-brand" href="/">
+        <Link className="brand auth-brand" to="/">
           <span className="brand-mark" aria-hidden="true">in</span>
           <span>profile<span className="brand-accent">rater</span></span>
-        </a>
+        </Link>
 
         <div className="auth-content">
-          <a className="back-link" href="/">← Back to profile review</a>
+          <Link className="back-link" to="/">← Back to profile review</Link>
           <span className="eyebrow">WELCOME TO PROFILE RATER</span>
           <h1 className="large-heading headline-fade">Your next chapter starts here.</h1>
           <p className="auth-description">
@@ -60,9 +70,9 @@ export function AuthPage() {
             <span aria-hidden="true">→</span>
           </button>
 
-          {error && (
+          {(error || sessionError) && (
             <p className="notice notice-error auth-notice" role="alert">
-              {error}
+              {error || sessionError}
             </p>
           )}
 

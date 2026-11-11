@@ -5,6 +5,7 @@ export interface AuthContextValue {
   user: AuthUser | null
   loading: boolean
   loadError: string | null
+  completeSignIn: (user: AuthUser) => void
   signOut: () => Promise<void>
   retrySession: () => Promise<void>
 }

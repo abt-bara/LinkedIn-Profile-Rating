@@ -17,16 +17,16 @@ export type Metric = {
 export type GraphResponse = Record<string, Metric>
 
 export const COLOR_MAP = {
-  c1: { v1: '#1F3A5F', v2: '#6C8CB5' },
-  c2: { v1: '#1B6B73', v2: '#6FB1B7' },
-  c3: { v1: '#3E4C59', v2: '#9AA5B1' },
-  c4: { v1: '#2F6B4F', v2: '#7FB59A' },
-  c5: { v1: '#5B3A6B', v2: '#A98BB8' },
-  c6: { v1: '#7A2E3A', v2: '#C08A92' },
-  c7: { v1: '#A8741A', v2: '#E0BC7A' },
-  c8: { v1: '#3B3F8C', v2: '#8D90D1' },
-  c9: { v1: '#B05A3C', v2: '#E0A58F' },
-  c10: { v1: '#6B7A3A', v2: '#B7C27F' },
+  c1: { v1: '#0A66C2', v2: '#9DC9ED' },
+  c2: { v1: '#004182', v2: '#8BBBE8' },
+  c3: { v1: '#2867B2', v2: '#A8CDEE' },
+  c4: { v1: '#378FE9', v2: '#B7DCF8' },
+  c5: { v1: '#155A9C', v2: '#90BDEB' },
+  c6: { v1: '#0B5394', v2: '#9BC5EC' },
+  c7: { v1: '#5A9BD5', v2: '#C1DDF5' },
+  c8: { v1: '#1D70B7', v2: '#A4CCED' },
+  c9: { v1: '#3F83C5', v2: '#B3D4F1' },
+  c10: { v1: '#0A4F8F', v2: '#91BCE6' },
 } as const
 
 export class HttpError extends Error {
@@ -95,16 +95,16 @@ export class HttpClient implements ApiClient {
       credentials: options.includeCredentials === false ? 'omit' : 'include',
     })
 
-    if (response.status === 401) {
-      window.location.assign('/auth')
-      throw new HttpError('Authentication required.', 401)
-    }
-
     const body = await readResponse(response)
 
     if (!response.ok) {
       throw new HttpError(
-        getErrorMessage(body, `Request failed (${response.status}).`),
+        getErrorMessage(
+          body,
+          response.status === 401
+            ? 'Authentication required.'
+            : `Request failed (${response.status}).`,
+        ),
         response.status,
       )
     }
