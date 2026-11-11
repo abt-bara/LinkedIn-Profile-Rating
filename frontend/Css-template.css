@@ -1978,3 +1978,31 @@
     transition: none;
   }
 }
+
+/* LinkedIn Profile Rater — blue/light application tokens */
+:root {
+  --profile-blue: #2f70b7;
+  --profile-blue-dark: #245c98;
+  --profile-blue-pale: #f0f6fc;
+  --profile-canvas: #fbfcfe;
+  --profile-ink: #1c2b3a;
+  --profile-muted: #687a8d;
+  --profile-border: #e5ebf1;
+  --profile-border-strong: #d7e1eb;
+  --profile-error: #a53d39;
+  --profile-error-border: #efd0cd;
+  --profile-shadow: 0 12px 30px rgba(37, 57, 79, 0.12);
+}
+
+.headline-fade {
+  animation: profile-headline-fade 620ms ease-out both;
+}
+
+@keyframes profile-headline-fade {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .headline-fade { animation: none; }
+}

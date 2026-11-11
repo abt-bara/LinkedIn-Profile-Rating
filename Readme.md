@@ -10,4 +10,13 @@
   <p style="font-size: 1.1rem; line-height: 1.7; margin: 0.75rem 0 0;">
     Each folder contains its own documentation, including API contracts, project structure, development stack, and descriptions.
   </p>
+  <h3>— Backend Composition —</h3>
+  <p>
+  The backend is made of 3 main folders :
+  <h3> (The ai server )["./Backend/ai server"] :
+  contains the ai models and communicates with both the auth and 
+  - (The auth server )["./Backend/auth server"]
+  - (The gateway )["./Backend/auth server"]
+
+  </p>
 </div>

@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="zcovIMfOj-Xqy2HuK52f" name="Page-1">
-        <mxGraphModel dx="916" dy="523" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+        <mxGraphModel dx="863" dy="1286" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -105,6 +105,15 @@
                     <mxGeometry height="50" relative="1" width="50" as="geometry">
                         <mxPoint x="820" y="550" as="sourcePoint"/>
                         <mxPoint x="870" y="500" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="ox-teUx1N1C9X4PzO2NX-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="LinkedIn auth server&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="60" width="120" x="340" y="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="ox-teUx1N1C9X4PzO2NX-4" edge="1" parent="1" style="endArrow=classic;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="ox-teUx1N1C9X4PzO2NX-3" value="">
+                    <mxGeometry height="50" relative="1" width="50" as="geometry">
+                        <mxPoint x="440" y="220" as="sourcePoint"/>
+                        <mxPoint x="490" y="170" as="targetPoint"/>
                     </mxGeometry>
                 </mxCell>
             </root>
