@@ -26,5 +26,5 @@ export function ProtectedRoute() {
     )
   }
 
-  return <Outlet />
+  return <Outlet /> 
 }
