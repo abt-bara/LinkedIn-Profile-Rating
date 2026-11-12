@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type DragEvent,
+  type FormEvent,
 } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { AppHeader } from '../components/AppHeader'
@@ -16,12 +17,19 @@ import {
   getGraph,
   type GraphResponse,
 } from '../services/httpClient'
+import { profileService } from '../services/profileService'
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024
+const DURATION_SECONDS = {
+  hours: 60 * 60,
+  days: 24 * 60 * 60,
+  months: 30 * 24 * 60 * 60,
+} as const
+const DURATION_MAX = { hours: 6 * 30 * 24, days: 6 * 30, months: 6 } as const
 const Y_TICKS = [100, 80, 60, 40, 20, 0]
 
 const FALLBACK_PALETTE = { v1: '#0a66c2', v2: '#9dc9ed' }
@@ -163,6 +171,8 @@ export function ProfileCheckPage() {
   const { user } = useAuth()
   const graphRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null)
+  const graphRequestId = useRef(0)
 
   const [graph, setGraph] = useState<GraphResponse | null>(null)
   const [graphLoading, setGraphLoading] = useState(true)
@@ -170,25 +180,34 @@ export function ProfileCheckPage() {
   const [graphVisible, setGraphVisible] = useState(false)
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
-  const [videoOpen, setVideoOpen] = useState(false)
+  const [pdfHelpOpen, setPdfHelpOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [analysisResult, setAnalysisResult] = useState<unknown>(null)
   const [isResultOpen, setIsResultOpen] = useState(false)
+  const [durationAmount, setDurationAmount] = useState('24')
+  const [durationUnit, setDurationUnit] = useState<keyof typeof DURATION_SECONDS>('hours')
+  const [magicLink, setMagicLink] = useState<string | null>(null)
+  const [magicLinkLoading, setMagicLinkLoading] = useState(false)
+  const [magicLinkError, setMagicLinkError] = useState<string | null>(null)
 
   const loadGraph = useCallback(async () => {
+    const requestId = ++graphRequestId.current
     setGraphLoading(true)
     setGraphError(null)
 
     try {
-      setGraph(await getGraph())
+      const response = await getGraph()
+      if (requestId === graphRequestId.current) setGraph(response)
     } catch (error) {
-      setGraphError(
-        error instanceof Error ? error.message : 'Could not load profile metrics.',
-      )
+      if (requestId === graphRequestId.current) {
+        setGraphError(
+          error instanceof Error ? error.message : 'Could not load profile metrics.',
+        )
+      }
     } finally {
-      setGraphLoading(false)
+      if (requestId === graphRequestId.current) setGraphLoading(false)
     }
   }, [])
 
@@ -225,15 +244,28 @@ export function ProfileCheckPage() {
     return () => observer.disconnect()
   }, [graphLoading])
 
-  /* ---- Close video modal on Escape -------------------------------------- */
+  /* ---- Close PDF help on Escape ----------------------------------------- */
   useEffect(() => {
-    if (!videoOpen) return
+    if (!pdfHelpOpen) return
+
+    const previousFocus = document.activeElement
+    pdfHelpCloseRef.current?.focus()
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setVideoOpen(false)
+      if (event.key === 'Escape') {
+        setPdfHelpOpen(false)
+      } else if (event.key === 'Tab') {
+        event.preventDefault()
+        pdfHelpCloseRef.current?.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [videoOpen])
+
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+  }, [pdfHelpOpen])
 
   /* ---- Derived ---------------------------------------------------------- */
   const metrics = useMemo(() => getMetricEntries(graph), [graph])
@@ -280,17 +312,48 @@ export function ProfileCheckPage() {
     setIsResultOpen(false)
 
     try {
-      const result = await analyze(file)
-      setAnalysisResult(result)
+      const response = await analyze(file)
+      graphRequestId.current += 1
+      setAnalysisResult(response.analysisResult)
+      setGraph(response.graphData)
+      setGraphError(null)
+      setGraphLoading(false)
       setIsResultOpen(true)
-      setUploading(false)
-      await loadGraph()
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : 'We couldn’t analyze this profile. Try again.',
       )
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function handleMagicLinkSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const amount = Number(durationAmount)
+    if (
+      !Number.isSafeInteger(amount) ||
+      amount < 1 ||
+      amount > DURATION_MAX[durationUnit]
+    ) {
+      setMagicLinkError(
+        `Enter a whole number from 1 to ${DURATION_MAX[durationUnit]} ${durationUnit}.`,
+      )
+      return
+    }
+
+    setMagicLinkError(null)
+    setMagicLink(null)
+    setMagicLinkLoading(true)
+    try {
+      const durationSeconds = amount * DURATION_SECONDS[durationUnit]
+      setMagicLink(await profileService.generateMagicLink(durationSeconds))
+    } catch (error) {
+      setMagicLinkError(
+        error instanceof Error ? error.message : 'Could not generate the magic link.',
+      )
+    } finally {
+      setMagicLinkLoading(false)
     }
   }
 
@@ -567,7 +630,7 @@ export function ProfileCheckPage() {
               <button className="button button-primary" type="button" onClick={handleUploadClick} disabled={uploading}>
                 {uploading ? 'Analyzing…' : 'Upload PDF'}
               </button>
-              <button type="button" className="upload-link" onClick={() => setVideoOpen(true)}>
+              <button type="button" className="upload-link" onClick={() => setPdfHelpOpen(true)}>
                 How do I get my profile PDF?
               </button>
             </div>
@@ -599,7 +662,7 @@ export function ProfileCheckPage() {
               </div>
             )}
 
-            {isResultOpen && analysisResult !== null && (
+            {isResultOpen && (
               <div className="analysis-result border-grad shadow-sm">
                 <div className="analysis-result-head">
                   <b>Analysis result</b>
@@ -619,31 +682,98 @@ export function ProfileCheckPage() {
             )}
           </div>
         </section>
+
+        {user?.role === 'admin' && (
+          <section className="admin-magic-link" aria-labelledby="magic-link-title">
+            <div className="admin-magic-link-copy">
+              <span className="admin-label">ADMIN TOOL</span>
+              <h2 id="magic-link-title">Create a magic link</h2>
+              <p>Generate a temporary sign-in link with a custom expiry.</p>
+            </div>
+
+            <form className="magic-link-form" onSubmit={(event) => void handleMagicLinkSubmit(event)}>
+              <label htmlFor="magic-link-duration">Duration</label>
+              <div className="magic-link-duration">
+                <input
+                  id="magic-link-duration"
+                  type="number"
+                  min={1}
+                  max={DURATION_MAX[durationUnit]}
+                  step={1}
+                  required
+                  value={durationAmount}
+                  onChange={(event) => setDurationAmount(event.target.value)}
+                  aria-describedby="magic-link-duration-help"
+                />
+                <select
+                  aria-label="Duration unit"
+                  value={durationUnit}
+                  onChange={(event) => {
+                    const unit = event.target.value as keyof typeof DURATION_SECONDS
+                    setDurationUnit(unit)
+                    setDurationAmount(unit === 'hours' ? '24' : '1')
+                  }}
+                >
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                  <option value="months">Months</option>
+                </select>
+                <button type="submit" className="button button-primary" disabled={magicLinkLoading}>
+                  {magicLinkLoading ? 'Generating…' : 'Generate link'}
+                </button>
+              </div>
+              <small id="magic-link-duration-help">
+                From 1 hour to 6 months. One month is calculated as 30 days.
+              </small>
+
+              {magicLinkError && (
+                <p className="magic-link-message is-error" role="alert">
+                  {magicLinkError}
+                </p>
+              )}
+              {magicLink && (
+                <p className="magic-link-message is-success" role="status">
+                  Magic link created:{' '}
+                  <a href={magicLink} target="_blank" rel="noreferrer">
+                    {magicLink}
+                  </a>
+                </p>
+              )}
+            </form>
+          </section>
+        )}
       </main>
 
-      {videoOpen && (
-        <div className="video-modal" onClick={() => setVideoOpen(false)}>
+      {pdfHelpOpen && (
+        <div className="pdf-help-modal" onClick={() => setPdfHelpOpen(false)}>
           <div
-            className="video-dialog"
+            className="pdf-help-dialog"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="How to get your LinkedIn PDF"
+            aria-labelledby="pdf-help-title"
           >
             <button
+              ref={pdfHelpCloseRef}
               type="button"
-              className="video-close"
-              onClick={() => setVideoOpen(false)}
-              aria-label="Close video help"
+              className="pdf-help-close"
+              onClick={() => setPdfHelpOpen(false)}
+              aria-label="Close PDF instructions"
             >
               ×
             </button>
-            <video autoPlay muted loop playsInline>
-              <source
-                src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
-                type="video/mp4"
-              />
-            </video>
+            <span className="eyebrow">GET YOUR PROFILE PDF</span>
+            <h2 id="pdf-help-title">Save your LinkedIn profile as a PDF</h2>
+            <ol>
+              <li>Open your profile on LinkedIn.</li>
+              <li>Choose <strong>More</strong> in your profile introduction.</li>
+              <li>Select <strong>Save to PDF</strong>, then save the file.</li>
+              <li>Return here and upload the PDF (up to 15 MB).</li>
+            </ol>
+            <p>
+              Only upload a file you have permission to share. Your PDF will be
+              sent to Profile Rater for analysis.
+            </p>
           </div>
         </div>
       )}

@@ -40,21 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  const completeSignIn = useCallback((authenticatedUser: AuthUser) => {
-    setUser(authenticatedUser)
-    setLoadError(null)
-  }, [])
-
   const value = useMemo(
     () => ({
       user,
       loading,
       loadError,
-      completeSignIn,
       signOut,
       retrySession,
     }),
-    [user, loading, loadError, completeSignIn, signOut, retrySession],
+    [user, loading, loadError, signOut, retrySession],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
