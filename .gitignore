@@ -1,2 +1,5 @@
-g.sh
-plan.md
+*
+!docs/
+!docs/**
+!dist/
+!dist/**
