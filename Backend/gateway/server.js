@@ -1,8 +1,21 @@
-const express = require('express')
-const app = express()
+import express from "express";
+import cors from "cors";
 
-app.get('/',(req,res) => {
-    res.send("Hello");
-})
+const app = express();
+app.use(express.json());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:4173",
+    ],
+  }),
+);
+app.get("/", (req, res) => {
+  res.send("Hello");
+});
 
-app.listen(["localhost:5173","localhost:5174","localhsot:4173"]);
+app.listen(3000, () => {
+  console.log("\n \n --- server is running successfully ---\n \n");
+});

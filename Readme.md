@@ -15,7 +15,7 @@ Git branches :
 ## Repository layout
 
 - [`frontend/`](./frontend/): Vite, React, and TypeScript application.
-- [`Backend/`](./Backend/): backend services and their documentation.(Express/FastAPI)
+- [`Backend/`](./Backend/): backend servers .(Express/FastAPI)
 - [`docs/`](./docs/): application diagrams and supporting documentation.
 
 The frontend's detailed API request/response contracts, cookie requirements,
