@@ -68,7 +68,7 @@ Details: [architecture](architecture.md).
 | Frontend                     | React, TypeScript, Vite, ESLint                    |
 | Gateway, Auth, LinkedIn auth | Node.js, Express                                   |
 | AI                           | Python, FastAPI, local LLM, RAG                    |
-| Data                         | PostgreSQL (and Redis cache, per `Diagram.drawio`) |
+| Data                         | PostgreSQL (plus redis) |
 | Edge                         | nginx plus a tunnel to localhost                   |
 | Identity                     | LinkedIn, Sign In with OpenID Connect              |
 

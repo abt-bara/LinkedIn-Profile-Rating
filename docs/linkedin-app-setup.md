@@ -5,9 +5,6 @@ tags: [profile-rater, linkedin, setup, security]
 created: 2026-11-12
 ---
 
-# LinkedIn App Setup
-
-Part of [[overview]]. Used by [[linkedin-auth-server]].
 
 ## Current app (Developer Portal)
 
