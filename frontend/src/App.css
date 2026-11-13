@@ -55,6 +55,44 @@
 
 .rater-brand-accent { color: #0a66c2; }
 
+.rater-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.rater-header-user {
+  color: #586d82;
+  font-size: 0.88rem;
+}
+
+.rater-signout-button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid #dce6f1;
+  border-radius: 9px;
+  color: #191919;
+  background: #fff;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.rater-signout-button:hover:not(:disabled) {
+  border-color: #9dc9ed;
+  background: #f3f8fc;
+}
+
+.rater-signout-button:disabled { cursor: progress; opacity: 0.7; }
+
+.rater-signout-error {
+  max-width: 24ch;
+  color: #a32929;
+  font-size: 0.78rem;
+}
+
 .rater-main {
   width: min(1100px, calc(100% - 48px));
   margin: 0 auto;
@@ -410,6 +448,90 @@
 
 .rater-upload { margin-top: 18px; scroll-margin-top: 24px; }
 
+.admin-magic-link {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 28px;
+  margin-top: 22px;
+  padding: 26px;
+  border: 1px solid rgba(10, 102, 194, 0.2);
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(112, 181, 249, 0.16), transparent 65%),
+    #fff;
+  box-shadow: 0 14px 34px rgba(10, 44, 80, 0.06);
+}
+
+.admin-label {
+  color: var(--r-blue);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.admin-magic-link-copy h2 {
+  margin: 8px 0 0;
+  color: var(--r-ink);
+  font-size: 1.2rem;
+}
+
+.admin-magic-link-copy p {
+  margin: 8px 0 0;
+  color: var(--r-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.magic-link-form > label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--r-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.magic-link-duration {
+  display: flex;
+  gap: 8px;
+}
+
+.magic-link-duration input,
+.magic-link-duration select {
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--r-line);
+  border-radius: 10px;
+  color: var(--r-ink);
+  background: #fff;
+}
+
+.magic-link-duration input { width: 96px; }
+.magic-link-duration select { flex: 1; }
+.magic-link-duration .button { white-space: nowrap; }
+
+.magic-link-form > small {
+  display: block;
+  margin-top: 8px;
+  color: var(--r-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.magic-link-message {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.magic-link-message a { color: var(--r-blue); font-weight: 650; }
+.magic-link-message.is-error { color: var(--ruby-700); background: var(--ruby-50); }
+.magic-link-message.is-success { color: var(--jade-800); background: var(--jade-50); }
+
 .upload-panel {
   width: 100%;
   padding: 36px 24px 28px;
@@ -591,8 +713,7 @@
   font-size: 0.85rem;
 }
 
-.result-close,
-.video-close {
+.result-close {
   width: 30px;
   height: 30px;
   display: grid;
@@ -605,11 +726,9 @@
   cursor: pointer;
 }
 
-.video-close { position: absolute; top: 10px; right: 10px; z-index: 1; background: rgba(255,255,255,.85); }
+/* ---- PDF help modal ----------------------------------------------------- */
 
-/* ---- Video modal -------------------------------------------------------- */
-
-.video-modal {
+.pdf-help-modal {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -620,16 +739,38 @@
   backdrop-filter: blur(9px);
 }
 
-.video-dialog {
+.pdf-help-dialog {
   position: relative;
-  width: min(720px, 90vw);
-  overflow: hidden;
+  width: min(520px, 100%);
+  padding: 32px;
+  border: 1px solid var(--r-line);
   border-radius: 18px;
-  box-shadow: 0 18px 52px rgba(17, 24, 39, 0.4);
-  background: #090d13;
+  color: var(--r-ink);
+  background: #fff;
+  box-shadow: 0 18px 52px rgba(17, 24, 39, 0.24);
 }
 
-.video-dialog video { display: block; width: 100%; height: auto; max-height: 76vh; background: #111827; }
+.pdf-help-dialog .eyebrow { margin-bottom: 10px; }
+.pdf-help-dialog h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.025em; }
+.pdf-help-dialog ol { display: grid; gap: 12px; margin: 20px 0; padding-left: 22px; color: var(--r-muted); line-height: 1.55; }
+.pdf-help-dialog li::marker { color: var(--r-blue); font-weight: 700; }
+.pdf-help-dialog p { margin: 0; color: var(--r-muted); font-size: 0.88rem; line-height: 1.6; }
+
+.pdf-help-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--r-ink);
+  background: #edf2f7;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
 
 /* ---- Focus + motion ----------------------------------------------------- */
 
@@ -660,10 +801,15 @@
 @media (max-width: 900px) {
   .rater-dashboard { grid-template-columns: 1fr; }
   .summary-card { padding: 22px; }
+  .admin-magic-link { grid-template-columns: 1fr; gap: 20px; }
 }
 
 @media (max-width: 640px) {
   .rater-main { width: min(100% - 24px, 1100px); padding-top: 24px; }
+  .rater-header { padding-inline: 12px; }
+  .rater-header-actions { gap: 8px; }
+  .rater-header-user { max-width: 15ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rater-signout-error { position: absolute; top: 70px; right: 12px; z-index: 2; padding: 6px 9px; border-radius: 8px; background: #fff; box-shadow: 0 4px 14px rgba(10, 44, 80, 0.12); }
   .chart-card { padding: 16px 12px 14px; }
   .chart-head { flex-direction: column; gap: 10px; }
   .chart { --plot-h: 230px; grid-template-columns: 26px minmax(0, 1fr); column-gap: 6px; }
@@ -672,6 +818,12 @@
   .bar-wrap { width: min(14px, 44%); }
   .breakdown-list li { grid-template-columns: 84px minmax(0, 1fr) 30px 42px; gap: 8px; }
   .upload-panel { padding-left: 14px; padding-right: 14px; }
+  .admin-magic-link { padding: 20px 16px; }
+  .magic-link-duration { flex-wrap: wrap; }
+  .magic-link-duration input { width: 84px; }
+  .magic-link-duration select { min-width: 100px; }
+  .magic-link-duration .button { width: 100%; justify-content: center; }
+  .pdf-help-dialog { padding: 28px 22px 22px; }
 }
 
 /* ---- Sign-in page ------------------------------------------------------- */
@@ -828,6 +980,21 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
+.auth-retry-button {
+  display: block;
+  margin: 12px auto 0;
+  padding: 4px;
+  border: 0;
+  color: var(--jade-700);
+  background: transparent;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.auth-retry-button:hover { text-decoration: underline; }
 
 .auth-privacy {
   margin: 18px 0 0;

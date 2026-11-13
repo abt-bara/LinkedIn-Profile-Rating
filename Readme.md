@@ -4,38 +4,19 @@
 
 # LinkedIn Profile Rater
 
-A web application for reviewing LinkedIn profiles. The repository contains a
-React frontend and backend service projects; frontend routing and protected-page
-navigation are being developed independently of backend session verification.
+A web application for reviewing LinkedIn profiles. The frontend is a Vite,
+React, and TypeScript application; backend services are documented separately.
+Git branches :
 
+- Each developer creates his own branch from main , and main is the branch where we collect all devs pull requests.
+- Deployment is branch meant only for frontend builds : it only contains dist/ docs/ and a Readme.md
+
+<h3 style="color: red;">Read /docs — they can help with understanding the project better.</h3>
 ## Repository layout
 
 - [`frontend/`](./frontend/): Vite, React, and TypeScript application.
-- [`Backend/`](./Backend/): backend service projects and their documentation.
+- [`Backend/`](./Backend/): backend servers .(Express/FastAPI)
 - [`docs/`](./docs/): application diagrams and supporting documentation.
 
-## Frontend quick start
-
-```sh
-cd frontend
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-The app is served locally by Vite. See the [frontend README](./frontend/README.md)
-for available routes, the live API endpoints, and how to configure the gateway
-URL. The default gateway URL is `http://localhost:3000`.
-
-## Project status
-
-The frontend includes an authentication page and a protected profile-review
-page. Authentication tokens are not stored in `localStorage`: the intended
-session mechanism uses a server-managed `HttpOnly` cookie, which browser
-JavaScript cannot read. The frontend auth provider checks the current user
-through the session endpoint. Profile metrics and uploaded PDF analysis use the
-live gateway endpoints; the frontend does not substitute sample data if the
-backend is unavailable. The route guard is a navigation aid, not a security
-boundary. Backend access control must be enforced by the server, which should
-set the cookie with `HttpOnly`, `Secure` in production, and an appropriate
-`SameSite` policy.
+The frontend's detailed API request/response contracts, cookie requirements,
+and gateway configuration are documented in the

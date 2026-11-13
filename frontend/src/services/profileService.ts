@@ -7,7 +7,7 @@ function validateMagicLink(value: unknown): string {
 
   let url: URL
   try {
-    url = new URL(value.trim(), window.location.origin)
+    url = new URL(value.trim())
   } catch {
     throw new Error('The service did not return a valid magic link.')
   }
@@ -30,20 +30,26 @@ export class ProfileService {
     return this.client.get(`/profile-check?url=${encodeURIComponent(url)}`)
   }
 
-  async generateMagicLink(): Promise<string> {
-    const result = await this.client.post('/magic-link', {})
-
-    if (typeof result === 'string') return validateMagicLink(result)
-    if (typeof result === 'object' && result !== null) {
-      if ('url' in result) {
-        return validateMagicLink(result.url)
-      }
-      if ('magicLink' in result) {
-        return validateMagicLink(result.magicLink)
-      }
+  async generateMagicLink(durationSeconds: number): Promise<string> {
+    if (
+      !Number.isSafeInteger(durationSeconds) ||
+      durationSeconds < 60 * 60 ||
+      durationSeconds > 6 * 30 * 24 * 60 * 60
+    ) {
+      throw new Error('Magic-link duration must be between 1 hour and 6 months.')
     }
 
-    throw new Error('The service did not return a valid magic link.')
+    const result = await this.client.post('/magic-link', { durationSeconds })
+
+    if (
+      typeof result !== 'object' ||
+      result === null ||
+      !('url' in result)
+    ) {
+      throw new Error('The service did not return a valid magic link.')
+    }
+
+    return validateMagicLink(result.url)
   }
 }
 

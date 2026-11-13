@@ -16,6 +16,11 @@ export type Metric = {
 
 export type GraphResponse = Record<string, Metric>
 
+export type AnalyzeResponse = {
+  analysisResult: unknown
+  graphData: GraphResponse
+}
+
 export const COLOR_MAP = {
   c1: { v1: '#0A66C2', v2: '#9DC9ED' },
   c2: { v1: '#004182', v2: '#8BBBE8' },
@@ -126,13 +131,6 @@ export class HttpClient implements ApiClient {
 
 export const httpClient = new HttpClient()
 
-export async function authenticate(token: string): Promise<unknown> {
-  return httpClient.request('/auth', {
-    method: 'POST',
-    body: JSON.stringify({ token }),
-  }, { includeCredentials: true })
-}
-
 export async function getUser(): Promise<OpenIdUser> {
   return httpClient.get('/user') as Promise<OpenIdUser>
 }
@@ -152,12 +150,62 @@ export async function getGraph(): Promise<GraphResponse> {
   return httpClient.get('/graph') as Promise<GraphResponse>
 }
 
-export async function analyze(file: File): Promise<unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseGraphResponse(value: unknown): GraphResponse {
+  if (!isRecord(value)) {
+    throw new Error('The analysis service returned invalid graph data.')
+  }
+
+  const graph: GraphResponse = {}
+
+  for (const [key, metricValue] of Object.entries(value)) {
+    if (!isRecord(metricValue)) {
+      throw new Error('The analysis service returned invalid graph data.')
+    }
+
+    const { name, val, oldval } = metricValue
+    if (
+      (typeof name !== 'undefined' && typeof name !== 'string') ||
+      (typeof val !== 'undefined' && (typeof val !== 'number' || !Number.isFinite(val))) ||
+      (typeof oldval !== 'undefined' &&
+        (typeof oldval !== 'number' || !Number.isFinite(oldval))) ||
+      (typeof val === 'undefined' && typeof oldval === 'undefined')
+    ) {
+      throw new Error('The analysis service returned invalid graph data.')
+    }
+
+    graph[key] = {
+      name: typeof name === 'string' ? name : key,
+      ...(typeof val === 'number' ? { val } : {}),
+      ...(typeof oldval === 'number' ? { oldval } : {}),
+    }
+  }
+
+  return graph
+}
+
+function parseAnalyzeResponse(value: unknown): AnalyzeResponse {
+  if (!isRecord(value) || !('analysisResult' in value) || !('graphData' in value)) {
+    throw new Error('The analysis service returned an invalid response.')
+  }
+
+  return {
+    analysisResult: value.analysisResult,
+    graphData: parseGraphResponse(value.graphData),
+  }
+}
+
+export async function analyze(file: File): Promise<AnalyzeResponse> {
   const formData = new FormData()
   formData.append('file', file)
 
-  return httpClient.request('/Analyze', {
+  const response = await httpClient.request('/analyze', {
     method: 'POST',
     body: formData,
   })
+
+  return parseAnalyzeResponse(response)
 }

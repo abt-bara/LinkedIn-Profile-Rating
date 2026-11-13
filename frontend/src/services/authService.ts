@@ -1,5 +1,4 @@
 import {
-  authenticate,
   getUser,
   HttpError,
   httpClient,
@@ -11,6 +10,7 @@ export interface AuthUser {
   name: string
   firstName: string
   email?: string
+  role?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -49,6 +49,7 @@ function parseUser(value: unknown): AuthUser {
     name: finalName,
     firstName: givenName,
     email: typeof record.email === 'string' ? record.email : undefined,
+    role: typeof record.role === 'string' ? record.role : undefined,
   }
 }
 
@@ -66,10 +67,6 @@ export class AuthService {
       if (error instanceof HttpError && error.status === 401) return null
       throw error
     }
-  }
-
-  async authenticate(token: string): Promise<AuthUser> {
-    return parseUser(await authenticate(token))
   }
 
   async signOut(): Promise<void> {
