@@ -10,15 +10,15 @@ export type OpenIdUser = {
 
 export type Metric = {
   name: string
-  val?: number
+  val: number
   oldval?: number
 }
 
-export type GraphResponse = Record<string, Metric>
+export type GraphData = Record<string, Metric>
 
 export type AnalyzeResponse = {
   analysisResult: unknown
-  graphData: GraphResponse
+  graphData: GraphData
 }
 
 export const COLOR_MAP = {
@@ -158,20 +158,16 @@ export async function sign(payload: Record<string, unknown>): Promise<unknown> {
   )
 }
 
-export async function getGraph(): Promise<GraphResponse> {
-  return httpClient.get('/graph') as Promise<GraphResponse>
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function parseGraphResponse(value: unknown): GraphResponse {
+function parseGraphData(value: unknown): GraphData {
   if (!isRecord(value)) {
     throw new Error('The analysis service returned invalid graph data.')
   }
 
-  const graph: GraphResponse = {}
+  const graph: GraphData = {}
 
   for (const [key, metricValue] of Object.entries(value)) {
     if (!isRecord(metricValue)) {
@@ -181,17 +177,17 @@ function parseGraphResponse(value: unknown): GraphResponse {
     const { name, val, oldval } = metricValue
     if (
       (typeof name !== 'undefined' && typeof name !== 'string') ||
-      (typeof val !== 'undefined' && (typeof val !== 'number' || !Number.isFinite(val))) ||
+      typeof val !== 'number' ||
+      !Number.isFinite(val) ||
       (typeof oldval !== 'undefined' &&
-        (typeof oldval !== 'number' || !Number.isFinite(oldval))) ||
-      (typeof val === 'undefined' && typeof oldval === 'undefined')
+        (typeof oldval !== 'number' || !Number.isFinite(oldval)))
     ) {
       throw new Error('The analysis service returned invalid graph data.')
     }
 
     graph[key] = {
       name: typeof name === 'string' ? name : key,
-      ...(typeof val === 'number' ? { val } : {}),
+      val,
       ...(typeof oldval === 'number' ? { oldval } : {}),
     }
   }
@@ -206,7 +202,7 @@ function parseAnalyzeResponse(value: unknown): AnalyzeResponse {
 
   return {
     analysisResult: value.analysisResult,
-    graphData: parseGraphResponse(value.graphData),
+    graphData: parseGraphData(value.graphData),
   }
 }
 

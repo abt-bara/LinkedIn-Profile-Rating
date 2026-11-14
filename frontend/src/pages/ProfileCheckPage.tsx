@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -14,8 +13,7 @@ import { AppHeader } from '../components/AppHeader'
 import {
   analyze,
   COLOR_MAP,
-  getGraph,
-  type GraphResponse,
+  type GraphData,
 } from '../services/httpClient'
 import { profileService } from '../services/profileService'
 
@@ -38,7 +36,7 @@ const FALLBACK_PALETTE = { v1: '#0a66c2', v2: '#9dc9ed' }
 /*  Helpers                                                                   */
 /* -------------------------------------------------------------------------- */
 
-type Metric = { key: string; name: string; val?: number; oldval?: number }
+type Metric = { key: string; name: string; val: number; oldval?: number }
 
 function clamp(value: number): number {
   return Math.min(100, Math.max(0, value))
@@ -49,14 +47,11 @@ function toBarHeight(value?: number): number {
   return clamp(value)
 }
 
-function getMetricEntries(response: GraphResponse | null): Metric[] {
+function getMetricEntries(response: GraphData | null): Metric[] {
   if (!response) return []
 
   return Object.entries(response)
-    .filter(
-      ([, metric]) =>
-        metric && (typeof metric.val === 'number' || typeof metric.oldval === 'number'),
-    )
+    .filter(([, metric]) => metric && typeof metric.val === 'number')
     .map(([key, metric]) => ({
       key,
       name: metric.name || key,
@@ -172,11 +167,8 @@ export function ProfileCheckPage() {
   const graphRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null)
-  const graphRequestId = useRef(0)
 
-  const [graph, setGraph] = useState<GraphResponse | null>(null)
-  const [graphLoading, setGraphLoading] = useState(true)
-  const [graphError, setGraphError] = useState<string | null>(null)
+  const [graph, setGraph] = useState<GraphData | null>(null)
   const [graphVisible, setGraphVisible] = useState(false)
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
@@ -192,37 +184,10 @@ export function ProfileCheckPage() {
   const [magicLinkLoading, setMagicLinkLoading] = useState(false)
   const [magicLinkError, setMagicLinkError] = useState<string | null>(null)
 
-  const loadGraph = useCallback(async () => {
-    const requestId = ++graphRequestId.current
-    setGraphLoading(true)
-    setGraphError(null)
-
-    try {
-      const response = await getGraph()
-      if (requestId === graphRequestId.current) setGraph(response)
-    } catch (error) {
-      if (requestId === graphRequestId.current) {
-        setGraphError(
-          error instanceof Error ? error.message : 'Could not load profile metrics.',
-        )
-      }
-    } finally {
-      if (requestId === graphRequestId.current) setGraphLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const timerId = window.setTimeout(() => {
-      void loadGraph()
-    }, 0)
-
-    return () => window.clearTimeout(timerId)
-  }, [loadGraph])
-
   /* ---- Animate bars when the chart scrolls into view -------------------- */
   useEffect(() => {
     const node = graphRef.current
-    if (!node || graphLoading) return
+    if (!node || !graph || Object.keys(graph).length === 0) return
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (prefersReducedMotion) {
@@ -242,7 +207,7 @@ export function ProfileCheckPage() {
 
     observer.observe(node)
     return () => observer.disconnect()
-  }, [graphLoading])
+  }, [graph])
 
   /* ---- Close PDF help on Escape ----------------------------------------- */
   useEffect(() => {
@@ -313,11 +278,8 @@ export function ProfileCheckPage() {
 
     try {
       const response = await analyze(file)
-      graphRequestId.current += 1
       setAnalysisResult(response.analysisResult)
       setGraph(response.graphData)
-      setGraphError(null)
-      setGraphLoading(false)
       setIsResultOpen(true)
     } catch (error) {
       setUploadError(
@@ -384,11 +346,9 @@ export function ProfileCheckPage() {
         <section className="rater-welcome">
           <h1>Welcome back, {firstName}</h1>
           <p className="rater-subtitle">
-            {graphError
-              ? 'Your live profile metrics are temporarily unavailable.'
-              : hasData
-                ? 'Here is how your profile reads to recruiters right now.'
-                : 'Upload your LinkedIn PDF to see how your profile scores.'}
+            {hasData
+              ? 'Here is how your profile reads to recruiters right now.'
+              : 'Upload your LinkedIn PDF to see how your profile scores.'}
           </p>
         </section>
 
@@ -433,7 +393,7 @@ export function ProfileCheckPage() {
                   {columns.map((metric, index) => {
                     const paletteKey = `c${(index % 10) + 1}` as keyof typeof COLOR_MAP
                     const palette = COLOR_MAP?.[paletteKey] ?? FALLBACK_PALETTE
-                    const showBars = hasData && !graphLoading
+                    const showBars = hasData
                     const dim = activeKey !== null && activeKey !== metric.key
 
                     return (
@@ -478,28 +438,7 @@ export function ProfileCheckPage() {
                   })}
                 </div>
 
-                {graphLoading && (
-                  <div className="chart-overlay" aria-live="polite">
-                    <span className="chart-spinner" />
-                    Loading your metrics…
-                  </div>
-                )}
-
-                {!graphLoading && graphError && (
-                  <div className="chart-overlay chart-empty" role="alert">
-                    <strong>Couldn’t load your metrics</strong>
-                    <span>{graphError}</span>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={() => void loadGraph()}
-                    >
-                      Try again
-                    </button>
-                  </div>
-                )}
-
-                {!graphLoading && !graphError && !hasData && (
+                {!hasData && (
                   <div className="chart-overlay chart-empty">
                     <strong>No scores yet</strong>
                     <span>Upload your LinkedIn PDF to request a profile analysis.</span>
@@ -558,10 +497,10 @@ export function ProfileCheckPage() {
                   </ul>
                 </div>
               </>
-            ) : graphError ? (
-              <p className="score-grade muted">Your profile scores could not be loaded.</p>
             ) : (
-              <p className="score-grade muted">Your score appears here after your first upload.</p>
+              <p className="score-grade muted">
+                Your score appears here after an analysis in this session.
+              </p>
             )}
           </aside>
 

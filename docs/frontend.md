@@ -105,14 +105,14 @@ session check failed, the user can retry that check before starting a new login.
 `src/pages/HomePage.tsx` provides the public `/home` landing page. It introduces
 the profile dashboard, AI-assisted profile ratings, and profile lists in
 alternating copy-and-visual sections. The feature previews are local UI only;
-they do not call the analysis, graph, or profile-list APIs. The page reads the existing auth context populated by `GET /api/me` to link
+they do not call the analysis or profile-list APIs. The page reads the existing auth context populated by `GET /api/me` to link
 signed-in users to `/` and guests to `/auth`. The frontend must handle the
 gateway's redirect when the session is missing.
 
 ### Profile dashboard
 
-`src/pages/ProfileCheckPage.tsx` initially loads the current metrics from
-`GET /api/graph`. It displays:
+`src/pages/ProfileCheckPage.tsx` starts with an empty score view. It receives
+metrics from `graphData` after a successful PDF analysis and displays:
 
 - a previous/current grouped chart, with scores clamped to 0–100 visually;
 - an overall score calculated as the rounded arithmetic mean of each metric's
@@ -120,11 +120,10 @@ gateway's redirect when the session is missing.
 - comparison with the prior values (`oldval`, falling back to the current
   value when no prior value exists);
 - the two lowest-scoring focus areas and a per-metric breakdown;
-- explicit loading, empty, retry, and request-error states.
+- an empty prompt before analysis, plus upload progress and error states.
 
-An empty graph object represents no scores yet. A metric is rendered when it
-has a numeric `val` or `oldval`. The backend should return finite numeric
-scores and meaningful metric names.
+Refreshing the page clears the displayed metrics until the next successful
+analysis.
 
 ### PDF upload and analysis
 
@@ -136,9 +135,8 @@ the file type, content, and size.
 
 The request contains one multipart field named `file`. While it is in flight,
 the UI shows a busy state and skeleton. On success, the frontend renders
-`analysisResult` recursively and immediately replaces the dashboard metrics
-with `graphData`; it does not follow with another `GET /api/graph`. Invalid
-responses or failed requests are shown as upload errors.
+`analysisResult` recursively and replaces the dashboard metrics with
+`graphData`. Invalid responses or failed requests are shown as upload errors.
 
 The PDF-help dialog provides steps for LinkedIn's profile **More → Save to
 PDF** action. It can be dismissed with Escape or the close button and returns

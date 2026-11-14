@@ -1,0 +1,34 @@
+<mxfile host="65bd71144e">
+    <diagram id="Phs_cd8dPsdZ4RTQY9z-" name="Page-1">
+        <mxGraphModel dx="626" dy="1183" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-2" parent="1" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" value="User" vertex="1">
+                    <mxGeometry height="210" width="140" x="240" y="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-4" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="id" vertex="1">
+                    <mxGeometry height="30" width="140" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-8" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="name" vertex="1">
+                    <mxGeometry height="30" width="140" y="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-5" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="given_name" vertex="1">
+                    <mxGeometry height="30" width="140" y="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-6" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="family_name" vertex="1">
+                    <mxGeometry height="30" width="140" y="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-7" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="Email" vertex="1">
+                    <mxGeometry height="30" width="140" y="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-9" parent="o_mbkfn7YEefZC_ff3q0-2" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="Role&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="30" width="140" y="180" as="geometry"/>
+                </mxCell>
+                <mxCell id="o_mbkfn7YEefZC_ff3q0-17" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="khw yizzi&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="30" width="60" x="290" y="580" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

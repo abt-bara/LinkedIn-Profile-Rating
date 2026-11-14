@@ -1,14 +1,4 @@
----
-title: Profile Rater — Overview
-aliases: [Profile Rater, Home, Project Overview]
-tags: [profile-rater, overview, moc]
-created: 2026-11-12
-status: draft
----
-
 # Profile Rater — Overview
-
-One-line summary
 
 > Profile Rater is a web app where a user signs in with **LinkedIn**, uploads their **LinkedIn profile as a PDF**, and receives a **score out of 100 per profile section** plus **actionable notes**, while tracking progress against their previous check.
 
@@ -19,7 +9,7 @@ One-line summary
 - **Seven section scores** (0–100): Headline, About, Experience, Skills, Education, Network, Activity.
 - **An overall score** with the change since the last check (example: 69, up 7 from 62).
 - **"Work on these first"**: the lowest-scoring sections.
-- **Detailed notes** as nested feedback, for example under Skills → Programming → React: _"it is better to specify experience"_.
+- **Detailed notes** as nested feedback, for example under Skills → Programming → React: *"it is better to specify experience"*.
 
 ## The user journey
 
@@ -48,7 +38,6 @@ flowchart LR
   L <-->|OAuth 2.0 / OIDC| LI[(LinkedIn)]
 ```
 
-
 ## Components
 
 | Component            | Folder                         | Role                                                                             | Doc                                             |
@@ -62,18 +51,18 @@ flowchart LR
 
 ## Tech stack
 
-| Layer                        | Technology                                         |
-| ---------------------------- | -------------------------------------------------- |
-| Frontend                     | React, TypeScript, Vite, ESLint                    |
-| Gateway, Auth, LinkedIn auth | Node.js, Express                                   |
-| AI                           | Python, FastAPI, local LLM, RAG                    |
-| Data                         | PostgreSQL (plus redis) |
-| Edge                         | nginx plus a tunnel to localhost                   |
-| Identity                     | LinkedIn OAuth 2.0 authorization-code flow                        |
+| Layer                        | Technology                                 |
+| ---------------------------- | ------------------------------------------ |
+| Frontend                     | React, TypeScript, Vite, ESLint            |
+| Gateway, Auth, LinkedIn auth | Node.js, Express                           |
+| AI                           | Python, FastAPI, local LLM, RAG            |
+| Data                         | PostgreSQL (plus Redis)                    |
+| Edge                         | nginx plus a tunnel to localhost           |
+| Identity                     | LinkedIn OAuth 2.0 authorization-code flow |
 
 ## Repository layout
 
-```
+```text
 .
 ├── Backend/
 │   ├── ai server/
@@ -87,29 +76,57 @@ flowchart LR
 └── Readme.md
 ```
 
-## Frontend–Gateway API contracts
+---
 
-This is the canonical contract for requests from the browser frontend to the
-gateway. The service documents describe internal responsibilities and
-implementation; they do not define a separate frontend-facing API. These
-contracts describe the intended integration and do not imply that every route
-is implemented yet.
+## Frontend–Gateway routes
 
-All paths below are same-origin paths under `/api`. The edge/proxy must forward
-these paths to the gateway, including the LinkedIn callback. Browser requests
-that need the session send the session cookie. The cookie is `HttpOnly`,
-`Secure` in production, and uses an appropriate `SameSite` policy.
+The Vite proxy forwards these frontend requests to the gateway.
 
-### Authentication
+### `GET /api/signin`
 
-| Method and path | Request | Success / behavior |
-|---|---|---|
-| `GET /api/signin` | Top-level browser navigation; no request body. | Redirects (`302`) to LinkedIn's authorization endpoint using the parameters below. |
-| `GET /api/signin/callback` | LinkedIn redirects the browser here with `code` and `state`; the public proxy forwards the request to the backend auth flow. | Backend validates the response, exchanges the code server-to-server, establishes a session, then sets the session cookie and redirects to `/`. On failure, it redirects to `/auth?error=<safe-code>`. |
-| `GET /api/me` | Sends the session cookie; no request body. | With a valid session, returns the current user as JSON. With a missing or invalid session, redirects to `/auth`. |
-| `POST /api/signout` | Sends the session cookie and an empty JSON object (`{}`). | Invalidates the session, clears the cookie, and returns a successful status. Sign-out should be idempotent. |
+**Request**
 
-Example `/api/me` success response:
+Top-level browser `GET`; no request body.
+
+**Response**
+
+`302` redirect to LinkedIn:
+
+```text
+https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id={your_client_id}&redirect_uri={your_callback_url}&state=foobar&scope=liteprofile%20emailaddress%20w_member_social
+```
+
+Authorization query parameters:
+
+- `response_type` — string, required. Always `code`.
+- `client_id` — string, required. The API key generated for the registered LinkedIn application.
+- `redirect_uri` — URL, required. Must exactly match a Redirect URL registered in the [LinkedIn application configuration](https://www.linkedin.com/developers/). The callback is handled by the proxy at `https://<edge-domain>/api/signin/callback`.
+- `state` — string, optional in LinkedIn's parameter definition. A unique, hard-to-guess value is used to prevent [CSRF](https://en.wikipedia.org/wiki/Cross-site_request_forgery). `foobar` is a sample only; generate a new value for each sign-in.
+- `scope` — string, required. URL-encoded, space-delimited member permissions explicitly enabled for the application: `liteprofile emailaddress w_member_social`. See [LinkedIn permissions](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authentication) and [application development best practices](https://learn.microsoft.com/en-us/linkedin/shared/api-guide/best-practices/application-development?context=linkedin/context).
+
+### `GET /api/signin/callback`
+
+**Request**
+
+The proxy receives LinkedIn's redirect to the registered callback URL and forwards it to the backend with `state` and either `code` or an authorization error. Successful callback example (the authorization code is a placeholder):
+
+```text
+https://<edge-domain>/api/signin/callback?state=foobar&code={authorization_code}
+```
+
+**Response**
+
+On success, the backend sets the session cookie and redirects the browser to `/`. If sign-in fails, the backend redirects to `/auth`.
+
+### `GET /api/me`
+
+**Request**
+
+Session cookie; no request body.
+
+**Response**
+
+`200 OK` with the current user as JSON:
 
 ```json
 {
@@ -121,72 +138,33 @@ Example `/api/me` success response:
 }
 ```
 
-The frontend uses these fields to display the signed-in user. Visibility of
-role-specific UI is not a substitute for backend authorization.
+When the cookie is missing or invalid, the response redirects to `/auth`.
 
-The `GET /api/signin` redirect uses this URL shape:
+### `POST /api/signout`
 
-```text
-https://www.linkedin.com/oauth/v2/authorization
-  ?response_type=code
-  &client_id={your_client_id}
-  &redirect_uri={your_callback_url}
-  &state={unique_random_state}
-  &scope=liteprofile%20emailaddress%20w_member_social
-```
+**Request**
 
-`your_client_id` and `your_callback_url` are application configuration values.
-Generate a fresh, hard-to-guess `state` for each login and bind it to the
-browser; `foobar` is only an example and must not be used as a constant. The
-callback URL must be registered with LinkedIn and match the public proxied
-callback exactly. Keep client secrets and exchanged tokens on the backend.
+Session cookie and JSON body `{}`.
 
-> [!important]
-> The frontend currently checks the session using `fetch`. Fetch follows HTTP
-> redirects automatically, so the frontend recognizes the redirected `/auth`
-> response as an unauthenticated session and navigates there instead of
-> treating the login page as user data.
+**Response**
 
-The supported public login error codes are `access_denied`, `login_failed`,
-and `session_expired`. Do not include secrets, authorization codes, tokens, or
-raw internal errors in redirect URLs.
+Any `2xx` status after the session is invalidated and the cookie is cleared. The frontend ignores the response body.
 
-### Profile metrics and analysis
+### `POST /api/analyze`
 
-| Method and path | Request | Success response |
-|---|---|---|
-| `GET /api/graph` | Sends the session cookie; no request body. | JSON object keyed by metric. An empty object means the user has no scores yet. |
-| `POST /api/analyze` | Sends the session cookie and `multipart/form-data` with one `file` field containing the profile PDF. | JSON object containing both `analysisResult` and `graphData`. |
+**Request**
 
-The browser checks that the file is a PDF and no larger than 15 MiB before
-uploading. The backend must repeat file type, content, and size validation.
-`analysisResult` may be any JSON value (including nested objects and arrays)
-and contains the feedback displayed by the frontend. `graphData` is the latest
-score snapshot and uses the same shape as `/api/graph`, so the frontend does
-not make a second graph request after a successful analysis.
+Session cookie and `multipart/form-data` with one `file` field containing the profile PDF.
 
-Example graph response:
+**Response**
 
-```json
-{
-  "headline": { "name": "Headline", "val": 82, "oldval": 74 },
-  "experience": { "name": "Experience", "val": 68 },
-  "skills": { "name": "Skills", "oldval": 55 }
-}
-```
-
-Each metric may include a display `name` and current `val` and/or previous
-`oldval`. Any supplied score must be a finite number; at least one score is
-required for a metric to render. Names are optional in analysis responses; the
-frontend falls back to the metric key.
-
-Example analysis response:
+`200 OK` with JSON containing `analysisResult` and `graphData`. `analysisResult` is a JSON value containing the analysis feedback. `graphData` is keyed by metric; each metric has a numeric `val`, an optional numeric `oldval`, and an optional display `name`. `oldval` may be undefined for a user's first check.
 
 ```json
 {
   "analysisResult": {
     "Summary": "A concise profile assessment.",
-    "Recommendations": ["Clarify the headline.", "Add measurable outcomes."]
+    "Recommendations": ["Clarify the headline."]
   },
   "graphData": {
     "headline": { "name": "Headline", "val": 82, "oldval": 74 },
@@ -195,14 +173,84 @@ Example analysis response:
 }
 ```
 
-For JSON API failures, return a non-2xx status and a safe message, for example
-`{ "message": "A user-safe explanation" }`. Do not return stack traces,
-secrets, or tokens. The frontend displays safe error messages and does not
-automatically retry mutations.
+---
 
-These are the only frontend–gateway contracts documented here. The current
-frontend still contains an admin magic-link form and legacy service helpers;
-they are not part of this contract and need separate product/implementation
-decisions before being exposed as gateway routes.
+## Gateway routes
 
+### Gateway → Auth server
 
+Routes:
+
+- `/postuser`
+- `/patchuser`
+- `/getuser`
+- `/deleteuser`
+
+One schema is used in the request/response body — the `user`:
+
+```text
+user {
+  id
+  name
+  given_name
+  family_name
+  email
+  role
+}
+```
+
+### Gateway → LinkedIn auth server
+
+The gateway is the issuer, and its base path is `/api`.
+
+**`/api/authflow`**
+
+- Request: empty
+- Response:
+
+```text
+{
+  response_type: string
+  client_id:     string
+  redirect_uri:  url
+  state:         string
+  scope:         string
+}
+```
+
+**`/api/callback`**
+
+- Request:
+
+```text
+{
+  code:  string
+  state: string
+}
+```
+
+**`/postuser`**
+
+- Request: `postuser`
+- Response: `200`
+
+**`/api/check-token`**
+
+- Request: empty
+- Response: success
+
+### Gateway → AI server
+
+**`/api/get-analysis-result`**
+
+- Request: empty
+- Response: the analysis result (same body as in `POST /api/analyze` above)
+
+---
+
+## Notes
+
+- Every HTTP request goes through a full user-session authentication step: whenever the gateway receives a request, it calls `/api/me` on the auth server and expects a `200`.
+- If the auth server returns `401`, the gateway pushes two things automatically:
+  1. one back to the calling service, to break the function;
+  2. one to the frontend, to trigger a redirect.
