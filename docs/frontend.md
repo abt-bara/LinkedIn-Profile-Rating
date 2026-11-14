@@ -17,6 +17,8 @@ The frontend owns browser navigation, session-aware UI, request formatting,
 response validation needed for rendering, and user-facing errors. The backend
 owns authentication and authorization decisions, OAuth secrets and protocol
 handling, session creation and invalidation, and all protected data access.
+The browser communicates with the gateway only; it never calls the DB server
+or sends DB actor-identity headers directly.
 
 ## Architecture and authentication boundaries
 
@@ -123,7 +125,9 @@ metrics from `graphData` after a successful PDF analysis and displays:
 - an empty prompt before analysis, plus upload progress and error states.
 
 Refreshing the page clears the displayed metrics until the next successful
-analysis.
+analysis. The gateway is planned to persist each result in the DB server, but
+the current browser contract does not include a read-history route, so the
+frontend does not reload stored analyses after refresh.
 
 ### PDF upload and analysis
 

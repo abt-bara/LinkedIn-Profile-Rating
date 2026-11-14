@@ -1,58 +1,58 @@
 ---
 title: Auth Server
 aliases: [Auth Service, Sessions and Roles]
-tags: [profile-rater, backend, auth, postgresql]
+tags: [profile-rater, backend, auth]
 created: 2026-11-12
 ---
 
+# Auth Server
+
+Part of [[overview]].
 
 ## Purpose
-The auth server is the server responsible for securing the application by enforcing authorization on every layer of the application we have only 3 layers of authorization:  
-- **Guest** : guests can only reach linkedIn sign page and the application's home page. 
-- 
+
+The auth server owns the application's session lifecycle and answers the
+gateway's session-validation request. It is not the CRUD service for profile
+or analysis records; those entities are owned by the separate [[database-server]].
 
 ## Responsibilities
 
-| Area | Detail |
+| Area | Responsibility |
 |---|---|
-| Find or create user | Key on LinkedIn `sub`; store name, email, picture |
-| Sessions | Issue, validate, rotate and revoke session tokens |
-| Roles / authorities | e.g. `USER`, `ADMIN`; checked by the [[gateway]] |
-| Caching | Redis cache-aside for hot lookups (session, roles) |
+| Session issue | Establish a session after the LinkedIn identity has been validated and the user record is available |
+| Session validation | Validate the browser's session and return the authenticated user identity |
+| Session lifecycle | Expire, rotate, and revoke sessions, including sign-out |
+| Role context | Return the authenticated user's current `id` and `role` for gateway authorization checks |
 
-## Draft data model (proposal)
+The browser-facing `GET /api/me` contract is documented in [[overview]]. A
+successful response includes the user `id` and `role`; an absent or invalid
+session must not produce a successful response.
 
-```mermaid
-erDiagram
-  USERS ||--o{ USER_ROLES : has
-  ROLES ||--o{ USER_ROLES : grants
-  USERS ||--o{ SESSIONS : opens
-  USERS {
-    uuid id PK
-    string linkedin_sub UK
-    string email
-    string name
-    string picture_url
-    timestamp created_at
-  }
-  ROLES { int id PK
-          string name UK }
-  USER_ROLES { uuid user_id FK
-               int role_id FK }
-  SESSIONS { uuid id PK
-             uuid user_id FK
-             string token_hash
-             timestamp expires_at
-             timestamp revoked_at }
-```
+## Data ownership boundary
+
+- The DB server owns the `User` and `Analysis` entities and their CRUD API.
+- The gateway validates each protected request with the auth server before
+  calling the DB server.
+- For a DB `PATCH`, the gateway passes the authenticated actor's `id` and
+  `role`. The DB server checks that context and the requested change itself.
+- The session store and its implementation are not specified here. Do not
+  assume PostgreSQL or Redis until the auth-service implementation selects
+  them.
+
+## Session data
+
+At minimum, a session needs a user identifier, a non-reusable session token
+stored as a hash, an expiry time, and revocation state. The concrete schema,
+storage engine, and session cookie settings belong to the auth-server
+implementation; they are separate from the `User` and `Analysis` schema in
+[[database-server]].
 
 > [!note]
-> Store only a **hash** of session tokens, never the raw token.
+> Never store or log a raw session token. The frontend must not receive the
+> token in JSON or store it in browser-accessible storage.
 
 ## Frontend API boundary
 
-The auth server's internal user and session operations are described above. The
-public frontend-to-gateway endpoints and their request/response contracts are
-defined centrally in [[overview]]; this service document does not define a
-separate browser-facing API.
-- 
+The frontend calls the gateway only. Public request/response contracts are
+defined in [[overview]]; this page describes the auth server's internal
+responsibilities and does not add browser-facing routes.

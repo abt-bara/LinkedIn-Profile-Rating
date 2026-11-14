@@ -18,20 +18,36 @@ The flow is the **OpenID Connect Authorization Code Flow**: OAuth 2.0 answers *w
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant A as Linked Auth server
-    participant L as OpenId provider (LinkedIn's own API layer)
+    participant G as Gateway
+    participant O as LinkedIn auth server
+    participant L as LinkedIn
+    participant D as DB server
+    participant A as Auth server
 
-    B->>A: 1. Click Sign in with LinkedIn
-    Note over A: 2. Generate state, bind it to this browser
-    A-->>B: 2. Redirect to LinkedIn authorization URL
-    B->>L: 3. Authorization page, user signs in and consents
-    L-->>B: 4. Redirect to our callback with code and state
-    B->>A: 5. GET /api/signin/callback with code and state (forwarded by proxy)
-    Note over A: 5. Compare state with the stored one
-    A->>L: 6. POST token endpoint with code and client_secret
-    L-->>A: 7. access_token and id_token
-    Note over A: 8. Verify id_token, find or create user by sub, load roles
-    A-->>B: 9. Set session cookie, redirect into the app
+    B->>G: 1. Navigate to GET /api/signin
+    G->>O: 2. Request authorization URL
+    Note over O: Generate state and bind it to this browser
+    O-->>G: Authorization URL
+    G-->>B: 2. Redirect to LinkedIn
+    B->>L: 3. User signs in and consents
+    L-->>B: 4. Redirect to callback with code and state
+    B->>G: 5. GET /api/signin/callback
+    G->>O: Forward code and state
+    Note over O: Compare state with the stored value
+    O->>L: 6. POST token endpoint with code and client_secret
+    L-->>O: 7. access_token and id_token
+    Note over O: Verify id_token and return verified identity
+    O-->>G: 8. Verified LinkedIn identity
+    G->>D: Look up user by verified sub
+    alt User does not exist
+        G->>D: POST /internal/v1/users (role assigned as USER)
+        D-->>G: New user
+    else User exists
+        D-->>G: Existing user
+    end
+    G->>A: Create session for the user
+    A-->>G: Session established
+    G-->>B: 9. Set session cookie and redirect into the app
 ```
 
 Steps 1-5 and 9 pass through the **browser** (requests and redirects). Step 6 (the request, which carries the secret) and step 7 (the response, which carries the tokens) are **server to server**, so neither the secret nor the tokens reach the browser.
@@ -44,7 +60,7 @@ Steps 1-5 and 9 pass through the **browser** (requests and redirects). Step 6 (t
 | 5 | If the callback carries `error` (`user_cancelled_login`, `user_cancelled_authorize`), stop there. Otherwise compare the returned `state` with the stored one, **use it once** (delete it after reading), and reject on a mismatch, a missing value or an expired entry (CSRF protection) |
 | 6 | Send `client_id` and `client_secret` in the **POST body** (form-encoded), only server to server, over HTTPS. Never in a URL. The code is single-use and short-lived, so exchange it immediately |
 | 7-8 | Verify the `id_token`: signature (LinkedIn JWKS, `RS256`), `iss` = `https://www.linkedin.com`, `aud` = our client ID, `exp` and `iat` |
-| 8 | Find the user by LinkedIn `sub`; create if missing; load roles. Do **not** use the email as the key, because it is optional and can be absent |
+| 8 | The LinkedIn auth server returns the verified `sub` to the gateway. The gateway looks up the user by `linkedin_sub` through the DB server and creates a missing user with the default `USER` role. Do **not** use email as the key because it is optional and can be absent. A regular create request cannot create an `ADMIN` |
 | 9 | Issue a **new** session id (never reuse one from before login). Cookie: `HttpOnly`, `Secure`, `SameSite=Lax`. Then redirect into the app |
 
 > [!important]

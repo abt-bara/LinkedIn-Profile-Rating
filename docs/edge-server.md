@@ -21,6 +21,8 @@ Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► local
 - Pass real client info via `X-Forwarded-*` headers.
 - Rate limiting and basic abuse protection (first layer only).
 - Serve a friendly error page when the tunnel is down.
+- Forward public application requests only to the gateway. The DB server has
+  its own private port and must never be exposed as an edge upstream.
 
 ## Reference configuration
 
@@ -50,6 +52,8 @@ ssh -N -R 127.0.0.1:8080:localhost:3000 \
 ## Hardening checklist
 
 - [ ] Firewall: open only 22, 80, 443. The tunnel port stays on loopback.
+- [ ] Keep the DB server port private; allow connections only from trusted
+  backend services, including the gateway.
 - [ ] Dedicated `tunnel` user, no shell, key restricted with `permitlisten="127.0.0.1:8080"`.
 - [ ] Keep the tunnel alive (systemd unit or `autossh`).
 - [ ] Gateway sets `app.set('trust proxy', 1)` and binds `127.0.0.1`.

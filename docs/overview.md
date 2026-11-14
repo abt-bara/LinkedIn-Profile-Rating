@@ -29,11 +29,12 @@ flowchart LR
 flowchart LR
   U[Browser<br/>React SPA] -->|HTTPS| E[Edge server<br/>nginx - public]
   E ==>|tunnel| G
-  subgraph P[Private network - developer machine]
+  subgraph P[Private network]
     G[Gateway<br/>Express]
-    G --> A[Auth server<br/>sessions, roles, PostgreSQL]
+    G --> A[Auth server<br/>sessions and identity]
     G --> L[LinkedIn auth server]
     G --> AI[AI server<br/>FastAPI, local LLM, RAG]
+    G --> DB[DB server<br/>private HTTP CRUD<br/>port TBD]
   end
   L <-->|OAuth 2.0 / OIDC| LI[(LinkedIn)]
 ```
@@ -45,9 +46,10 @@ flowchart LR
 | Frontend             | `frontend/`                    | React SPA: login, dashboard, upload                                              | [Frontend](frontend.md)                         |
 | Edge server          | `Backend/edge server`          | Public nginx that exposes the local app to the internet                          | [Edge server](edge-server.md)                   |
 | Gateway              | `Backend/gateway`              | Single entry point; orchestrates the private servers                             | [Gateway](gateway.md)                           |
-| Auth server          | `Backend/auth server`          | Sessions/tokens, roles and authorities, stores LinkedIn OpenID data (PostgreSQL) | [Auth server](auth-server.md)                   |
+| Auth server          | `Backend/auth server`          | Session lifecycle and authenticated identity (`/api/me`)                        | [Auth server](auth-server.md)                   |
 | LinkedIn auth server | `Backend/LinkedIn-auth-server` | Sign-in/up flow with LinkedIn, state verification and validation                 | [LinkedIn auth server](linkedin-auth-server.md) |
 | AI server            | `Backend/ai server`            | FastAPI + local LLM + RAG; PDF in, scores and notes out                          | [AI server](ai-server.md)                       |
+| DB server            | `Backend/db server`            | Planned private HTTP service for `User` and `Analysis` persistence and CRUD      | [DB server](database-server.md)                 |
 
 ## Tech stack
 
@@ -56,7 +58,8 @@ flowchart LR
 | Frontend                     | React, TypeScript, Vite, ESLint            |
 | Gateway, Auth, LinkedIn auth | Node.js, Express                           |
 | AI                           | Python, FastAPI, local LLM, RAG            |
-| Data                         | PostgreSQL (plus Redis)                    |
+| Database API                 | Separate HTTP service; implementation and port TBD |
+| Data                         | `User` and `Analysis` entities; storage engine TBD |
 | Edge                         | nginx plus a tunnel to localhost           |
 | Identity                     | LinkedIn OAuth 2.0 authorization-code flow |
 
@@ -67,6 +70,7 @@ flowchart LR
 ├── Backend/
 │   ├── ai server/
 │   ├── auth server/
+│   ├── db server/       <- planned; separate process and port
 │   ├── edge server/
 │   ├── gateway/
 │   └── LinkedIn-auth-server/
@@ -173,35 +177,42 @@ Session cookie and `multipart/form-data` with one `file` field containing the pr
 }
 ```
 
+For an authenticated request, the gateway sends the validated AI result to the
+DB server as a new `Analysis` record owned by the `/api/me` user before it
+returns the response. The mapping between public `graphData` metric keys and
+the DB server's named score fields must be finalized before persistence is
+implemented; see [[database-server]].
+
 ---
 
 ## Gateway routes
 
 ### Gateway → Auth server
 
-Routes:
+The gateway calls the auth server to validate the browser's session and obtain
+the authenticated user's `id` and `role` (`GET /api/me`). User and analysis
+record CRUD belongs to the separate DB server, not the auth server.
 
-- `/postuser`
-- `/patchuser`
-- `/getuser`
-- `/deleteuser`
+### Gateway → DB server
 
-One schema is used in the request/response body — the `user`:
+The gateway calls the DB server directly over its private HTTP interface for
+`User` and `Analysis` CRUD. The DB server runs as a separate process on its own
+port; the port has not been assigned, and the service is not implemented yet.
+It is not a browser-facing API and must not be exposed through Vite or the
+public edge proxy.
 
-```text
-user {
-  id
-  name
-  given_name
-  family_name
-  email
-  role
-}
-```
+The planned internal endpoints use `GET`, `POST`, `PATCH`, and `DELETE`; no
+`PUT` endpoint is defined. The full request/response contracts, entity fields,
+authorization rules, and implementation gaps are in
+[[database-server]]. In particular, the gateway must pass trusted actor
+identity (`id` and `role`) for updates, and the DB server must enforce the
+rules independently.
 
 ### Gateway → LinkedIn auth server
 
-The gateway is the issuer, and its base path is `/api`.
+The gateway delegates authorization-code handling and identity verification
+to the LinkedIn auth server. The full sequence is in
+[[LinkedIn-auth-flow]].
 
 **`/api/authflow`**
 
@@ -229,10 +240,8 @@ The gateway is the issuer, and its base path is `/api`.
 }
 ```
 
-**`/postuser`**
-
-- Request: `postuser`
-- Response: `200`
+After identity verification, the gateway finds or creates the user through
+the DB server. The LinkedIn auth server does not own user-record CRUD.
 
 **`/api/check-token`**
 
@@ -243,14 +252,21 @@ The gateway is the issuer, and its base path is `/api`.
 
 **`/api/get-analysis-result`**
 
-- Request: empty
-- Response: the analysis result (same body as in `POST /api/analyze` above)
+- Request: gateway forwards the authenticated user's PDF for analysis.
+- Response: analysis result and scores. The gateway associates the result with
+  the authenticated `user_id` and persists an `Analysis` record through the
+  DB server before returning the browser-facing response.
 
 ---
 
 ## Notes
 
-- Every HTTP request goes through a full user-session authentication step: whenever the gateway receives a request, it calls `/api/me` on the auth server and expects a `200`.
-- If the auth server returns `401`, the gateway pushes two things automatically:
-  1. one back to the calling service, to break the function;
-  2. one to the frontend, to trigger a redirect.
+- Protected browser API requests enter through the gateway. Before handling
+  them, the gateway validates the session with the auth server's `/api/me`
+  endpoint. A failed check prevents the protected operation.
+- For DB mutations, the gateway passes the authenticated actor's `id` and
+  `role`; it must derive these from `/api/me`, not from browser-supplied data.
+  The DB server independently validates authorization and field-level rules.
+- The DB server's port, storage engine, and implementation are not yet set.
+  See [[database-server]] for the proposed contract and outstanding schema
+  decisions.

@@ -26,6 +26,12 @@ browser-facing `POST /api/analyze` response envelope and graph schema are
 defined centrally in [[overview]]. Keep this page focused on the AI pipeline
 and internal processing rather than duplicating the frontend API contract.
 
+After a successful analysis, the gateway associates the result with the
+authenticated user's `user_id` and stores an `Analysis` record through the
+private [[database-server]]. The AI server does not write directly to the
+database. The DB entity currently described in the diagram has eight named
+scores; confirm its mapping to the AI output before implementing persistence.
+
 ## Pipeline
 
 ```mermaid

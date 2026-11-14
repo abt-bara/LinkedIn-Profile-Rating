@@ -33,10 +33,11 @@ A screenshot showed part of the LinkedIn client secret. Rotate it. See [[linkedi
 
 | Question | Doc |
 |---|---|
-| Who stores score history (previous vs current)? | [[auth-server]] |
+| Score history, user-to-analysis ownership, and CRUD | [[database-server]] |
 | Cookie session or JWT plus refresh token? | [[auth-server]] |
 | How are Network and Activity scored from a PDF? | [[ai-server]] |
-| Final gateway route table (auth, LinkedIn auth, AI) | [[gateway]] |
+| DB port, persistence engine, and migrations | [[database-server]] |
+| Analysis timestamp and LinkedIn `sub` schema fields | [[database-server]] |
 | PDF retention policy | [[ai-server]] |
 
 ## 4. Missing pieces
@@ -46,6 +47,7 @@ A screenshot showed part of the LinkedIn client secret. Rotate it. See [[linkedi
 - [ ] "How do I get my profile PDF?" content
 - [ ] Friendly error page when the tunnel is down
 - [ ] Response schema (Pydantic) for the AI output
+- [ ] Implement the DB server and its private CRUD routes; see [[database-server]]
 
 ## Links
 - MDN, 502 Bad Gateway: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/502
