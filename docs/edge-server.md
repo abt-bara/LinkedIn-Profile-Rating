@@ -5,9 +5,6 @@ tags: [profile-rater, infra, nginx]
 created: 2026-11-12
 ---
 
-# Edge Server
-
-Part of [[architecture]]. Folder: `Backend/edge server`.
 
 ## Purpose
 
