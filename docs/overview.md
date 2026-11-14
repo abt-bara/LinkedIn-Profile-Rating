@@ -48,7 +48,6 @@ flowchart LR
   L <-->|OAuth 2.0 / OIDC| LI[(LinkedIn)]
 ```
 
-Details: [architecture](architecture.md).
 
 ## Components
 
@@ -70,7 +69,7 @@ Details: [architecture](architecture.md).
 | AI                           | Python, FastAPI, local LLM, RAG                    |
 | Data                         | PostgreSQL (plus redis) |
 | Edge                         | nginx plus a tunnel to localhost                   |
-| Identity                     | LinkedIn, Sign In with OpenID Connect              |
+| Identity                     | LinkedIn, Sign In with OpenID Connect (OICD Server)              |
 
 ## Repository layout
 
@@ -84,25 +83,10 @@ Details: [architecture](architecture.md).
 │   └── LinkedIn-auth-server/
 ├── docs/                 <- you are here
 ├── frontend/             <- Vite + React + TypeScript
-├── Diagram.drawio
 ├── plan.md
 └── Readme.md
 ```
 
-## Documentation map
+## API Contracts :<BR>
 
-1. [Architecture](architecture.md): topology, trust boundaries, request paths
-2. [Auth flow](auth-flow.md): the 9-step LinkedIn login sequence
-3. [LinkedIn app setup](linkedin-app-setup.md): LinkedIn Developer Portal configuration
-4. [Edge server](edge-server.md), [Gateway](gateway.md), [Auth server](auth-server.md), [LinkedIn auth server](linkedin-auth-server.md), [AI server](ai-server.md): per-service docs
-5. [Frontend](frontend.md): screens and data they display
-6. [Known issues](known-issues.md): current problems, risks and open questions
 
-> [!warning] Status
-> Written from the project description and UI screenshots. Items marked **(to confirm)** are inferences, so verify them against the code.
-
-## Links
-
-- LinkedIn Sign In with OpenID Connect: https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2
-- Obsidian callouts: https://help.obsidian.md/Editing+and+formatting/Callouts
-- Obsidian Mermaid support: https://help.obsidian.md/Editing+and+formatting/Advanced+formatting+syntax#Diagram

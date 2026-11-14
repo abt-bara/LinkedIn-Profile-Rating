@@ -7,13 +7,9 @@ created: 2026-11-12
 
 
 ## Purpose
-
-Owns **who the user is and what they may do**:
-
-- Manages **user session tokens**.
-- Manages **roles and authorities**.
-- **Saves the LinkedIn OpenID data** received from [[linkedin-auth-server]].
-- Owns the **PostgreSQL** database.
+The auth server is the server responsible for securing the application by enforcing authorization on every layer of the application we have only 3 layers of authorization:  
+- **Guest** : guests can only reach linkedIn sign page and the application's home page. 
+- 
 
 ## Responsibilities
 

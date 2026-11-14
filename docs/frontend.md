@@ -25,6 +25,7 @@ handling, session creation and invalidation, and all protected data access.
 
 | Route | Access | Behavior |
 |---|---|---|
+| `/home` | Public | Displays the feature-led Profile Rater landing page using the existing session context; it makes no feature-data requests. |
 | `/auth` | Public | Checks session state; signed-in users are redirected to `/`. Anonymous users see the LinkedIn sign-in page. |
 | `/` | Protected | Renders the profile dashboard after `GET /api/user` confirms a session. Anonymous users are redirected to `/auth`. |
 | Any other path | Public fallback | Displays a not-found page with a link to `/`. |
@@ -68,10 +69,12 @@ protected request.
 - On application start, `AuthProvider` calls `GET /api/user`.
 - While that request is pending, protected routes show a session-loading
   screen. `/auth` also waits for the initial check so a known signed-in user is
-  not prompted to sign in again.
+  not prompted to sign in again. `/home` remains available while the request
+  runs and after an unauthenticated or failed check.
 - A `200` user response populates context. `/` renders the dashboard and `/auth`
   redirects to `/`.
-- A `401` means there is no valid session. `/` redirects to `/auth`.
+- A `401` means there is no valid session. `/home` stays public; `/` redirects
+  to `/auth`.
 - Other failures (network, server, or invalid user response) are not treated as
   successful authentication. The route guard redirects to `/auth` with a
   recoverable message; the page allows a sign-in attempt or an explicit retry
@@ -96,6 +99,17 @@ protected request.
 does not construct the authorization URL or handle the callback. A returned
 `/auth?error=...` code is shown using a fixed message mapping. If the current
 session check failed, the user can retry that check before starting a new login.
+
+### Public home page
+
+`src/pages/HomePage.tsx` provides the public `/home` landing page. It introduces
+the profile dashboard, AI-assisted profile ratings, and profile lists in
+alternating copy-and-visual sections. The feature previews are local UI only;
+they do not call the analysis, graph, or profile-list APIs. The page reads the
+existing auth context populated by `GET /api/user` to link signed-in users to
+`/` and guests to `/auth`. The session-check endpoint does not redirect the
+browser; the existing route guard is responsible for redirects on protected
+routes.
 
 ### Profile dashboard
 
