@@ -49,6 +49,10 @@ erDiagram
 > [!note]
 > Store only a **hash** of session tokens, never the raw token.
 
-## API Contracts :
-- Full CRUD for users.
+## Frontend API boundary
+
+The auth server's internal user and session operations are described above. The
+public frontend-to-gateway endpoints and their request/response contracts are
+defined centrally in [[overview]]; this service document does not define a
+separate browser-facing API.
 - 

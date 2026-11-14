@@ -20,8 +20,8 @@ created: 2026-11-12
 
 ## Setup checklist
 
-- [ ] **Products tab:** add *Sign In with LinkedIn using OpenID Connect* (gives `openid profile email`).
-- [ ] **Auth tab, redirect URLs:** add `https://<edge-domain>/callback`. It must match the callback exactly, and it should be the public edge URL so real users can complete the flow.
+- [ ] **Products and permissions:** enable the LinkedIn products that grant the requested scopes `liteprofile`, `emailaddress`, and `w_member_social`. Verify these match the app's actual LinkedIn product configuration.
+- [ ] **Auth tab, redirect URLs:** add `https://<edge-domain>/api/signin/callback`. It must match the callback exactly, and it should be the public edge URL so real users can complete the flow.
 - [ ] **Privacy policy URL:** add one. It is shown to users on the consent screen.
 - [ ] **Verify** the app against the company page (the *Verify* button in Settings). Check whether the products you use require it.
 - [ ] **Business email:** update it to receive critical platform updates (banner in the portal).

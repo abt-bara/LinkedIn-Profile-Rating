@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext'
 
 export function ProtectedRoute() {
   // return <Outlet />  // DEV BYPASS: uncomment to preview pages without auth
-  // AuthProvider verifies the session through GET /api/user using the HttpOnly cookie.
+  // AuthProvider verifies the session through GET /api/me using the HttpOnly cookie.
   const { user, loading, loadError } = useAuth()
   const location = useLocation()
 
