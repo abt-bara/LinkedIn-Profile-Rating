@@ -20,7 +20,7 @@ Debug from the outside in:
 - [ ] Does nginx `proxy_pass` point to that same port? Check the nginx error log.
 - [ ] Is the **gateway** really listening on the local port (`ss -ltnp | grep 3000`)?
 - [ ] Does the gateway reach the [[linkedin-auth-server]]? Check its logs for connection errors.
-- [ ] Is the `/auth/linkedin` route proxied to the right upstream?
+- [ ] Is the `/api/signin` route proxied to the right upstream?
 
 > [!tip]
 > Test each hop separately with `curl`, from the inside out: service → gateway → tunnel port on the edge → public URL. The first hop that fails is the culprit.

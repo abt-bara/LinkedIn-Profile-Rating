@@ -16,3 +16,7 @@ The gateway orchestrates 3 servers:
 
 and recieves via a tunnel connected to [Edge Server](/Backend/edge%20server) .
 
+The canonical browser-facing routes and request/response contracts are listed
+in [[overview]]. This document describes the gateway's routing and orchestration
+responsibilities.
+

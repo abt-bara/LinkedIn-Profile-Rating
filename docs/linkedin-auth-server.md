@@ -11,12 +11,12 @@ Part of [[architecture]]. Folder: `Backend/LinkedIn-auth-server`.
 
 ## Purpose
 
-Ensures **sign-in and sign-up through LinkedIn** work: it runs the login-state verification and validation that the full flow ([[auth-flow]]) depends on. It talks to LinkedIn; it does not own users or sessions. It hands a verified identity to the [[auth-server]].
+Ensures **sign-in and sign-up through LinkedIn** work: it runs the login-state verification and validation that the full flow ([[LinkedIn-auth-flow]]) depends on. It talks to LinkedIn; it does not own users or sessions. It hands a verified identity to the [[auth-server]]. The browser-facing route contract is centralized in [[overview]].
 
 ## Responsibilities
 
 1. Build the LinkedIn authorize URL with a fresh `state` (and `nonce`).
-2. Handle `/callback`: validate `state`, reject on mismatch or LinkedIn error.
+2. Handle `/api/signin/callback`, forwarded by the public proxy: validate `state`, reject on mismatch or LinkedIn error.
 3. Exchange the `code` for tokens (server to server, with the client secret).
 4. Verify the `id_token`.
 5. Pass the verified identity (`sub`, name, email, picture) to the [[auth-server]] for find-or-create and session issuing.
@@ -30,14 +30,14 @@ Ensures **sign-in and sign-up through LinkedIn** work: it runs the login-state v
 | Userinfo | `https://api.linkedin.com/v2/userinfo` |
 | Discovery | `https://www.linkedin.com/oauth/.well-known/openid-configuration` |
 
-Scopes: `openid profile email`.
+Requested authorization scopes: `liteprofile emailaddress w_member_social` (URL-encoded in the authorization request). Enable the corresponding LinkedIn products and permissions for the application.
 
 ## Configuration (environment)
 
 ```bash
 LINKEDIN_CLIENT_ID=...
 LINKEDIN_CLIENT_SECRET=...        # never commit; see linkedin-app-setup
-LINKEDIN_REDIRECT_URI=https://<edge-domain>/callback
+LINKEDIN_REDIRECT_URI=https://<edge-domain>/api/signin/callback
 ```
 
 > [!warning]

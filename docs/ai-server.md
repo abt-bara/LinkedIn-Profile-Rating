@@ -19,18 +19,12 @@ Metrics are specified by the AI service team because they are the ones responsib
 
 
 
-## Response shape (inferred from the UI, to confirm)
+## Output boundary
 
-```json
-{
-  "AnalysisResult": {_},
-  "Graph":{{"name":{"oldval":},{"val":}},{...etc}},
-}
-```
-The name key refers to the key of the metric itself.
-"_" means any type.
-
-`notes` is **free-form and nested to any depth**, so the [[frontend]] needs a recursive renderer, and the API needs a stable contract (see below).
+The AI service produces nested feedback and score data for the gateway. The
+browser-facing `POST /api/analyze` response envelope and graph schema are
+defined centrally in [[overview]]. Keep this page focused on the AI pipeline
+and internal processing rather than duplicating the frontend API contract.
 
 ## Pipeline
 

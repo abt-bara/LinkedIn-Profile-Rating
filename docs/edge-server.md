@@ -53,7 +53,8 @@ ssh -N -R 127.0.0.1:8080:localhost:3000 \
 - [ ] Dedicated `tunnel` user, no shell, key restricted with `permitlisten="127.0.0.1:8080"`.
 - [ ] Keep the tunnel alive (systemd unit or `autossh`).
 - [ ] Gateway sets `app.set('trust proxy', 1)` and binds `127.0.0.1`.
-- [ ] The LinkedIn **redirect URL** uses the edge's public HTTPS domain (see [[linkedin-app-setup]]).
+- [ ] The LinkedIn **redirect URL** uses the edge's public HTTPS domain and
+  `/api/signin/callback` path (see [[linkedin-app-setup]]).
 
 > [!bug] A 502 on the login page
 > Seen in the UI: "Request failed (502)". It means nginx reached no valid upstream. See [[known-issues]] for a checklist.

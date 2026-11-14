@@ -26,7 +26,7 @@ sequenceDiagram
     A-->>B: 2. Redirect to LinkedIn authorization URL
     B->>L: 3. Authorization page, user signs in and consents
     L-->>B: 4. Redirect to our callback with code and state
-    B->>A: 5. GET callback with code and state
+    B->>A: 5. GET /api/signin/callback with code and state (forwarded by proxy)
     Note over A: 5. Compare state with the stored one
     A->>L: 6. POST token endpoint with code and client_secret
     L-->>A: 7. access_token and id_token
@@ -40,7 +40,7 @@ Steps 1-5 and 9 pass through the **browser** (requests and redirects). Step 6 (t
 
 | Step | Check |
 |---|---|
-| 2 | Generate an unguessable `state` and bind it to **this browser**: keep the server-side record under a random id, and put that id in a short-lived cookie (`HttpOnly`, `Secure`, `SameSite=Lax`). A server store alone is not enough, because nothing ties it to the browser that started the login. Request `scope=openid profile email` |
+| 2 | Generate an unguessable `state` and bind it to **this browser**: keep the server-side record under a random id, and put that id in a short-lived cookie (`HttpOnly`, `Secure`, `SameSite=Lax`). A server store alone is not enough, because nothing ties it to the browser that started the login. Request `scope=liteprofile emailaddress w_member_social` |
 | 5 | If the callback carries `error` (`user_cancelled_login`, `user_cancelled_authorize`), stop there. Otherwise compare the returned `state` with the stored one, **use it once** (delete it after reading), and reject on a mismatch, a missing value or an expired entry (CSRF protection) |
 | 6 | Send `client_id` and `client_secret` in the **POST body** (form-encoded), only server to server, over HTTPS. Never in a URL. The code is single-use and short-lived, so exchange it immediately |
 | 7-8 | Verify the `id_token`: signature (LinkedIn JWKS, `RS256`), `iss` = `https://www.linkedin.com`, `aud` = our client ID, `exp` and `iat` |
@@ -48,7 +48,7 @@ Steps 1-5 and 9 pass through the **browser** (requests and redirects). Step 6 (t
 | 9 | Issue a **new** session id (never reuse one from before login). Cookie: `HttpOnly`, `Secure`, `SameSite=Lax`. Then redirect into the app |
 
 > [!important]
-> **Redirect URL.** LinkedIn requires an absolute `HTTPS` URL with no `#`, registered in the developer portal, and the `redirect_uri` we send must match a registered one. Query parameters are ignored. Our own decision is to register the public edge URL and not `localhost` (see [[linkedin-app-setup]]).
+> **Redirect URL.** The callback is `https://<edge-domain>/api/signin/callback`; it must be an absolute `HTTPS` URL registered in the developer portal, and the `redirect_uri` we send must match it. Query parameters are ignored. Our own decision is to register the public edge URL and not `localhost` (see [[linkedin-app-setup]]).
 
 > [!info]
 > **Why `SameSite=Lax` and not `Strict`.** Step 4 is a cross-site redirect from LinkedIn back to us. A `Strict` cookie is not sent on that navigation, so the `state` cookie would be missing exactly when step 5 needs it.
@@ -75,3 +75,10 @@ The `id_token` already carries the profile claims, so for login alone a separate
 > - **`nonce`.** The earlier version of this note listed a `nonce` check at step 8 but never generated one at step 2. LinkedIn's documentation does not list `nonce` among the authorization parameters or the `id_token` claims. Test whether LinkedIn echoes it. Until confirmed, do not make the login fail on a missing `nonce`, and rely on `state` for the browser binding.
 > - **PKCE.** Not documented for this flow. We are a confidential server-side client with a `client_secret`, so it is not required, but check before relying on it.
 > - **`localhost` redirects.** The LinkedIn docs say `HTTPS` but do not explicitly forbid `localhost`. The "public edge URL" rule above is our own decision, not a LinkedIn rule.
+
+> [!warning]
+> The requested gateway authorization URL uses `liteprofile emailaddress
+> w_member_social`, while the OIDC notes above describe `openid profile email`.
+> Confirm the LinkedIn application product and permissions support the requested
+> scopes before implementation; do not silently substitute one scope set for
+> the other. The public endpoint contract is in [[overview]].

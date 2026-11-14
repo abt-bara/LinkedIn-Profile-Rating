@@ -100,6 +100,18 @@ export class HttpClient implements ApiClient {
       credentials: options.includeCredentials === false ? 'omit' : 'include',
     })
 
+    if (
+      path === '/me' &&
+      response.redirected &&
+      response.url &&
+      new URL(response.url).pathname === '/auth'
+    ) {
+      if (typeof window !== 'undefined' && window.location.pathname !== '/auth') {
+        window.location.replace('/auth')
+      }
+      throw new HttpError('Authentication required.', 401)
+    }
+
     const body = await readResponse(response)
 
     if (!response.ok) {
@@ -131,8 +143,8 @@ export class HttpClient implements ApiClient {
 
 export const httpClient = new HttpClient()
 
-export async function getUser(): Promise<OpenIdUser> {
-  return httpClient.get('/user') as Promise<OpenIdUser>
+export async function getMe(): Promise<OpenIdUser> {
+  return httpClient.get('/me') as Promise<OpenIdUser>
 }
 
 export async function sign(payload: Record<string, unknown>): Promise<unknown> {
