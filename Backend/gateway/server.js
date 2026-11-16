@@ -4,11 +4,13 @@ import config from "./config/config.json" with { type: "json" };
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import createAnalysisRouter from "./routers/analysis.js";
+import linkedInRouter from "./routers/linkedIn.js";
 
 // ---- Config: validate once, fail early with a clear message ----
-const PORT = config.server_port.gateway; // must be a number, for listen()
-const ORIGIN = config.server_url.gateway; // full URL, for Swagger "servers"
-const BasePath = config.uris.gateway.base;
+const PORT = config.server_port.gateway; 
+const ORIGIN = config.server_url.gateway; 
+// Ensure BasePath never starts with a slash to avoid double-slash bugs
+const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
 
 if (!Number.isInteger(PORT)) {
   throw new Error(
@@ -19,19 +21,19 @@ if (!Number.isInteger(PORT)) {
 const app = express();
 app.use(express.json());
 
-// ---- CORS: the browser origins allowed to call the gateway ----
+// ---- CORS ----
 app.use(
   cors({
     origin: [
-      config.server_url.frontend, // http://localhost:4173
+      config.server_url.frontend,
       "http://localhost:5173",
       "http://localhost:5174",
     ],
-    credentials: true, // required so the session cookie is accepted
+    credentials: true,
   }),
 );
 
-// ---- Swagger (disabled in production) ----
+// ---- Swagger ----
 if (process.env.NODE_ENV !== "production") {
   const specs = swaggerJsdoc({
     definition: {
@@ -44,11 +46,11 @@ if (process.env.NODE_ENV !== "production") {
       servers: [{ url: ORIGIN }],
       components: {
         securitySchemes: {
-          sessionCookie: { type: "apiKey", in: "cookie", name: "user_id" }, // adjust to your cookie name
+          sessionCookie: { type: "apiKey", in: "cookie", name: "user_id" },
         },
       },
     },
-    apis: ["./server.js", "./routers/*.js"], // files containing @openapi comments
+    apis: ["./server.js", "./routers/*.js"],
   });
 
   app.get("/api-docs.json", (req, res) => res.json(specs));
@@ -57,6 +59,18 @@ if (process.env.NODE_ENV !== "production") {
 
 // ---- Routes ----
 app.get("/", (req, res) => res.redirect("/api-docs"));
+/**
+ * @openapi
+ * /api:
+ *   get:
+ *     summary: Get LinkedIn auth flow configuration
+ *     responses:
+ *       200:
+ *         description: Auth flow configuration retrieved successfully
+ *       502:
+ *         description: LinkedIn auth server unreachable
+ */
+app.use(`/${BasePath}`, linkedInRouter);
 
 /**
  * @openapi
@@ -70,6 +84,7 @@ app.get("/", (req, res) => res.redirect("/api-docs"));
 app.get(`/${BasePath}/health`, (req, res) => {
   res.status(200).json({ Health: "server is running" });
 });
+
 app.use(
   `/${BasePath}`,
   createAnalysisRouter({
@@ -84,7 +99,6 @@ const server = app.listen(PORT, () => {
   console.log(`gateway listening on ${ORIGIN} (docs: ${ORIGIN}/api-docs)`);
 });
 
-// Works on Express 4 and 5: listen failures arrive as an 'error' event
 server.on("error", (err) => {
   console.error("listen failed:", err);
   process.exit(1);
