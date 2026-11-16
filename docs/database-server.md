@@ -11,8 +11,9 @@ persisting `User` and `Analysis` records.
 
 > [!warning] Planned service
 > The DB server is not implemented in this repository. It will run as a
-> separate service with its own port, but the port and storage engine have not
-> been chosen. The routes below are the proposed contract, not live endpoints.
+> separate service with its own port (`3003` in the gateway configuration).
+> The storage engine is undecided. The routes below are the proposed contract,
+> not live endpoints.
 
 ## Boundary and request flow
 
@@ -20,7 +21,7 @@ persisting `User` and `Analysis` records.
 flowchart LR
   B[Browser] -->|Public /api requests| G[Gateway]
   G -->|Validate session| A[Auth server]
-  G -->|Private HTTP CRUD<br/>port TBD| DB[DB server]
+  G -->|Private HTTP CRUD<br/>port 3003| DB[DB server]
   G --> AI[AI server]
 ```
 
@@ -30,9 +31,10 @@ flowchart LR
   `/api/me` endpoint before reading or mutating user data.
 - The DB server is internal-only. Do not expose its port through the edge
   server, Vite proxy, or browser.
-- Configure the gateway with a DB service URL (for example
-  `DB_SERVER_URL=http://127.0.0.1:<db-port>`). The environment variable and
-  port are recommendations; neither is implemented or assigned yet.
+- The gateway's configured DB service URL is `http://localhost:3003`; see
+  `Backend/gateway/config/config.json`.
+- Configure `DB_SERVICE_TOKEN` in the gateway environment and the matching
+  credential in the DB service before enabling internal calls.
 - Gateway-to-DB service authentication is required. Actor identity headers
   below are authorization context and are not, by themselves, proof that the
   caller is the gateway.
@@ -58,10 +60,11 @@ The source for the initial entity fields is [`Bd.drawio`](Bd.drawio).
 |---|---|
 | `id` | Primary key; concrete type/format TBD |
 | `user_id` | Foreign key to `User.id`; one user can have many analyses |
-| `analysis_result` | Nested AI feedback JSON |
+| `analysis_result` | Plain-text AI feedback |
+| `created_at` | Server-generated timestamp used to order analysis history |
 | `completeness` | Score from 0 to 100 |
 | `content_quality` | Score from 0 to 100 |
-| `keyword_role_relevance` | Score from 0 to 100 |
+| `keyword_and_role_relevance` | Score from 0 to 100 |
 | `career_trajectory` | Score from 0 to 100 |
 | `skills_depth` | Score from 0 to 100 |
 | `social_proof` | Score from 0 to 100 |
@@ -70,10 +73,8 @@ The source for the initial entity fields is [`Bd.drawio`](Bd.drawio).
 
 The database diagram does not yet include `linkedin_sub`, although LinkedIn
 sign-in uses that stable identity claim to find or create an account. Add it as
-a unique user field before implementing account lookup. The diagram also has
-no analysis timestamp; add a server-generated `created_at` before implementing
-history retrieval so the gateway can identify the latest and previous
-analysis. A server-generated `updated_at` is recommended for mutable records.
+a unique user field before implementing account lookup. A server-generated
+`updated_at` is recommended for mutable records.
 
 ## Internal HTTP contract
 
@@ -212,13 +213,10 @@ scores; it does not choose the owner independently of the authenticated actor.
 ```json
 {
   "analysis": {
-    "analysis_result": {
-      "summary": "A concise profile assessment.",
-      "recommendations": ["Clarify the headline."]
-    },
+    "analysis_result": "A concise profile assessment with recommendations.",
     "completeness": 82,
     "content_quality": 68,
-    "keyword_role_relevance": 75,
+    "keyword_and_role_relevance": 75,
     "career_trajectory": 70,
     "skills_depth": 80,
     "social_proof": 64,
@@ -233,19 +231,24 @@ scores; it does not choose the owner independently of the authenticated actor.
 `201 Created` with the stored analysis, including generated `id`, the
 authenticated `user_id`, and server-generated timestamps once they are added
 to the schema. Every supplied score must be finite and between 0 and 100.
+The internal AI-to-gateway response must provide this text and the eight
+structured scores; the gateway stores the record before returning only the
+plain-text feedback from `POST /api/analyze` to the browser.
 
-#### `GET /internal/v1/analyses`
+#### `GET /internal/v1/analyses?limit={count}`
 
 **Request**
 
-No body. Requires actor headers. A `USER` receives only their own analyses;
-an `ADMIN` may request another user's records with `?user_id={userId}`.
+No body. Requires actor headers. `limit` is an integer from 1 to 10 and
+defaults to 10. A `USER` receives only their own analyses; an `ADMIN` may
+request another user's records with `?user_id={userId}`.
 
 **Response**
 
-`200 OK` with an array of analysis records. Results must be ordered newest
-first by server-generated `created_at`; ordering cannot be reliable until the
-timestamp is added to the entity.
+`200 OK` with up to `limit` analysis records. Results are ordered newest first
+by server-generated `created_at`. The latest record is included in the
+response; aggregation of older records is a frontend concern, not a stored
+`oldval` field.
 
 #### `GET /internal/v1/analyses/{analysisId}`
 
@@ -309,10 +312,10 @@ an admin may delete any analysis.
 
 ## Open implementation decisions
 
-- Assign the service port and choose the storage engine.
-- Add `linkedin_sub` and analysis timestamps to the entity diagram/schema.
-- Map the current public `graphData` metric keys to the eight `Analysis` score
-  fields without dropping or silently renaming scores.
+- Choose the storage engine and implement the service on configured port 3003.
+- Add `linkedin_sub` to the user entity/schema.
+- Define and validate the internal AI-to-gateway shape for text feedback plus
+  the eight score fields.
 - Confirm collection-read and delete permissions for users and analyses.
 - Decide the user-delete policy for dependent analyses and how the first
   `ADMIN` is provisioned.

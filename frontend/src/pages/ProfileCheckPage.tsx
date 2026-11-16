@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -13,7 +14,8 @@ import { AppHeader } from '../components/AppHeader'
 import {
   analyze,
   COLOR_MAP,
-  type GraphData,
+  getAnalyses,
+  type AnalysisRecord,
 } from '../services/httpClient'
 import { profileService } from '../services/profileService'
 
@@ -30,13 +32,35 @@ const DURATION_SECONDS = {
 const DURATION_MAX = { hours: 6 * 30 * 24, days: 6 * 30, months: 6 } as const
 const Y_TICKS = [100, 80, 60, 40, 20, 0]
 
-const FALLBACK_PALETTE = { v1: '#0a66c2', v2: '#9dc9ed' }
+const GRAPH_COLORS = Object.values(COLOR_MAP)
+const ANALYSIS_HISTORY_LIMIT = 10
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
 /* -------------------------------------------------------------------------- */
 
-type Metric = { key: string; name: string; val: number; oldval?: number }
+type AnalysisMetricKey =
+  | 'completeness'
+  | 'content_quality'
+  | 'keyword_and_role_relevance'
+  | 'career_trajectory'
+  | 'skills_depth'
+  | 'social_proof'
+  | 'network'
+  | 'activity'
+
+type Metric = { key: AnalysisMetricKey; name: string; val: number; olderAverage?: number }
+
+const METRICS: { key: AnalysisMetricKey; name: string }[] = [
+  { key: 'completeness', name: 'Completeness' },
+  { key: 'content_quality', name: 'Content quality' },
+  { key: 'keyword_and_role_relevance', name: 'Keyword and role relevance' },
+  { key: 'career_trajectory', name: 'Career trajectory' },
+  { key: 'skills_depth', name: 'Skills depth' },
+  { key: 'social_proof', name: 'Social proof' },
+  { key: 'network', name: 'Network' },
+  { key: 'activity', name: 'Activity' },
+]
 
 function clamp(value: number): number {
   return Math.min(100, Math.max(0, value))
@@ -47,25 +71,29 @@ function toBarHeight(value?: number): number {
   return clamp(value)
 }
 
-function getMetricEntries(response: GraphData | null): Metric[] {
-  if (!response) return []
+function getMetricEntries(analyses: AnalysisRecord[]): Metric[] {
+  const [current, ...older] = analyses
+  if (!current) return []
 
-  return Object.entries(response)
-    .filter(([, metric]) => metric && typeof metric.val === 'number')
-    .map(([key, metric]) => ({
+  return METRICS.map(({ key, name }) => {
+    const olderScores = older.map((analysis) => analysis[key])
+    const olderAverage = olderScores.length
+      ? olderScores.reduce((total, score) => total + score, 0) / olderScores.length
+      : undefined
+
+    return {
       key,
-      name: metric.name || key,
-      val: metric.val,
-      oldval: metric.oldval,
-    }))
+      name,
+      val: current[key],
+      olderAverage,
+    }
+  })
 }
 
-function currentOf(m: Metric): number {
-  return typeof m.val === 'number' ? m.val : (m.oldval ?? 0)
-}
-
-function previousOf(m: Metric): number {
-  return typeof m.oldval === 'number' ? m.oldval : (m.val ?? 0)
+function getBarStyle(metricIndex: number, barIndex: number, barCount: number): CSSProperties {
+  const color = GRAPH_COLORS[metricIndex % GRAPH_COLORS.length]
+  const opacity = barCount < 2 ? 1 : 0.55 + (barIndex / (barCount - 1)) * 0.45
+  return { backgroundColor: color, opacity }
 }
 
 function gradeFor(score: number): string {
@@ -168,9 +196,11 @@ export function ProfileCheckPage() {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null)
 
-  const [graph, setGraph] = useState<GraphData | null>(null)
+  const [analyses, setAnalyses] = useState<AnalysisRecord[]>([])
   const [graphVisible, setGraphVisible] = useState(false)
   const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState<string | null>(null)
 
   const [pdfHelpOpen, setPdfHelpOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -184,10 +214,33 @@ export function ProfileCheckPage() {
   const [magicLinkLoading, setMagicLinkLoading] = useState(false)
   const [magicLinkError, setMagicLinkError] = useState<string | null>(null)
 
+  const loadAnalyses = useCallback(async () => {
+    setHistoryLoading(true)
+    setHistoryError(null)
+    try {
+      const history = await getAnalyses(ANALYSIS_HISTORY_LIMIT)
+      setAnalyses(history)
+      setGraphVisible(false)
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error ? error.message : 'Could not load your analysis history.',
+      )
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      void loadAnalyses()
+    }, 0)
+    return () => window.clearTimeout(timerId)
+  }, [loadAnalyses])
+
   /* ---- Animate bars when the chart scrolls into view -------------------- */
   useEffect(() => {
     const node = graphRef.current
-    if (!node || !graph || Object.keys(graph).length === 0) return
+    if (!node || analyses.length === 0) return
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (prefersReducedMotion) {
@@ -207,7 +260,7 @@ export function ProfileCheckPage() {
 
     observer.observe(node)
     return () => observer.disconnect()
-  }, [graph])
+  }, [analyses])
 
   /* ---- Close PDF help on Escape ----------------------------------------- */
   useEffect(() => {
@@ -233,25 +286,30 @@ export function ProfileCheckPage() {
   }, [pdfHelpOpen])
 
   /* ---- Derived ---------------------------------------------------------- */
-  const metrics = useMemo(() => getMetricEntries(graph), [graph])
+  const metrics = useMemo(() => getMetricEntries(analyses), [analyses])
   const hasData = metrics.length > 0
+  const hasOlderData = analyses.length > 1
   const firstName = user?.firstName || user?.name?.split(/\s+/)[0] || 'Friend'
 
   const totalScore = useMemo(() => {
     if (!hasData) return 0
-    return Math.round(metrics.reduce((s, m) => s + currentOf(m), 0) / metrics.length)
+    return Math.round(metrics.reduce((total, metric) => total + metric.val, 0) / metrics.length)
   }, [metrics, hasData])
 
   const olderRating = useMemo(() => {
-    if (!hasData) return 0
-    return Math.round(metrics.reduce((s, m) => s + previousOf(m), 0) / metrics.length)
-  }, [metrics, hasData])
+    const olderMetrics = metrics.filter((metric) => typeof metric.olderAverage === 'number')
+    if (olderMetrics.length === 0) return null
+    return Math.round(
+      olderMetrics.reduce((total, metric) => total + (metric.olderAverage ?? 0), 0) /
+        olderMetrics.length,
+    )
+  }, [metrics])
 
-  const scoreDelta = totalScore - olderRating
-  const scoreDirection = scoreDelta >= 0 ? 'up' : 'down'
+  const scoreDelta = olderRating === null ? null : totalScore - olderRating
+  const scoreDirection = scoreDelta === null || scoreDelta >= 0 ? 'up' : 'down'
 
   const focusAreas = useMemo(
-    () => [...metrics].sort((a, b) => currentOf(a) - currentOf(b)).slice(0, 2),
+    () => [...metrics].sort((a, b) => a.val - b.val).slice(0, 2),
     [metrics],
   )
 
@@ -277,10 +335,10 @@ export function ProfileCheckPage() {
     setIsResultOpen(false)
 
     try {
-      const response = await analyze(file)
-      setAnalysisResult(response.analysisResult)
-      setGraph(response.graphData)
+      const result = await analyze(file)
+      setAnalysisResult(result)
       setIsResultOpen(true)
+      await loadAnalyses()
     } catch (error) {
       setUploadError(
         error instanceof Error ? error.message : 'We couldn’t analyze this profile. Try again.',
@@ -359,19 +417,32 @@ export function ProfileCheckPage() {
             <header className="chart-head">
               <div>
                 <h2>Profile metrics</h2>
-                <p>Score out of 100 for each section</p>
+                <p>Current score compared with the average of earlier analyses</p>
               </div>
               <ul className="chart-legend" aria-label="Legend">
-                <li>
-                  <i className="legend-swatch legend-prev" /> Previous
-                </li>
-                <li>
-                  <i className="legend-swatch legend-curr" /> Current
-                </li>
+                {hasOlderData && (
+                  <li>
+                    <i className="legend-swatch legend-prev" /> Older average
+                  </li>
+                )}
+                {hasData && (
+                  <li>
+                    <i className="legend-swatch legend-curr" /> Current
+                  </li>
+                )}
               </ul>
             </header>
 
-            <div className="chart" role="img" aria-label="Profile metrics, previous versus current">
+            {historyError && hasData && (
+              <p className="notice notice-error" role="alert">
+                Could not refresh analysis history: {historyError}{' '}
+                <button type="button" className="upload-link" onClick={() => void loadAnalyses()}>
+                  Retry
+                </button>
+              </p>
+            )}
+
+            <div className="chart" role="img" aria-label="Current profile metrics compared with the older average">
               {/* Y axis */}
               <div className="chart-yaxis" aria-hidden="true">
                 {Y_TICKS.map((tick) => (
@@ -391,54 +462,66 @@ export function ProfileCheckPage() {
 
                 <div className="chart-bars">
                   {columns.map((metric, index) => {
-                    const paletteKey = `c${(index % 10) + 1}` as keyof typeof COLOR_MAP
-                    const palette = COLOR_MAP?.[paletteKey] ?? FALLBACK_PALETTE
-                    const showBars = hasData
                     const dim = activeKey !== null && activeKey !== metric.key
+                    const bars = [
+                      ...(typeof metric.olderAverage === 'number'
+                        ? [{ key: 'older', value: metric.olderAverage, className: 'bar-prev' }]
+                        : []),
+                      { key: 'current', value: metric.val, className: 'bar-curr' },
+                    ]
 
                     return (
                       <div
                         key={metric.key}
                         className={`chart-col${dim ? ' is-dim' : ''}`}
-                        onMouseEnter={() => hasData && setActiveKey(metric.key)}
+                        onMouseEnter={() => setActiveKey(metric.key)}
                         onMouseLeave={() => setActiveKey(null)}
                       >
-                        {showBars && typeof metric.oldval === 'number' && (
-                          <div className="bar-wrap">
-                            <span className="bar-tip" style={{ background: palette.v2 }}>
-                              {Math.round(metric.oldval)}
-                            </span>
-                            <div
-                              className="bar bar-prev"
-                              style={{
-                                height: graphVisible ? `${toBarHeight(metric.oldval)}%` : '0%',
-                                background: palette.v2,
-                                transitionDelay: `${index * 70}ms`,
-                              }}
-                            />
-                          </div>
-                        )}
-                        {showBars && typeof metric.val === 'number' && (
-                          <div className="bar-wrap">
-                            <span className="bar-tip" style={{ background: palette.v1 }}>
-                              {Math.round(metric.val)}
-                            </span>
-                            <div
-                              className="bar bar-curr"
-                              style={{
-                                height: graphVisible ? `${toBarHeight(metric.val)}%` : '0%',
-                                background: palette.v1,
-                                transitionDelay: `${index * 70 + 110}ms`,
-                              }}
-                            />
-                          </div>
-                        )}
+                        {bars.map((bar, barIndex) => {
+                          const colorStyle = getBarStyle(index, barIndex, bars.length)
+                          return (
+                            <div className="bar-wrap" key={bar.key}>
+                              <span className="bar-tip" style={colorStyle}>
+                                {Math.round(bar.value)}
+                              </span>
+                              <div
+                                className={`bar ${bar.className}`}
+                                style={{
+                                  ...colorStyle,
+                                  height: graphVisible ? `${toBarHeight(bar.value)}%` : '0%',
+                                  transitionDelay: `${index * 70 + barIndex * 110}ms`,
+                                }}
+                              />
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })}
                 </div>
 
-                {!hasData && (
+                {historyLoading && (
+                  <div className="chart-overlay" aria-live="polite">
+                    <span className="chart-spinner" />
+                    Loading your analysis history…
+                  </div>
+                )}
+
+                {!historyLoading && historyError && !hasData && (
+                  <div className="chart-overlay chart-empty" role="alert">
+                    <strong>Couldn’t load your scores</strong>
+                    <span>{historyError}</span>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void loadAnalyses()}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+
+                {!historyLoading && !historyError && !hasData && (
                   <div className="chart-overlay chart-empty">
                     <strong>No scores yet</strong>
                     <span>Upload your LinkedIn PDF to request a profile analysis.</span>
@@ -479,11 +562,15 @@ export function ProfileCheckPage() {
             {hasData ? (
               <>
                 <p className="score-grade">{gradeFor(totalScore)}</p>
-                <p className={`score-delta ${scoreDirection}`}>
-                  <span aria-hidden="true">{scoreDirection === 'up' ? '▲' : '▼'}</span>
-                  {formatDelta(scoreDelta)} since your last check
-                  <span className="older-rating"> (was {olderRating})</span>
-                </p>
+                {scoreDelta !== null ? (
+                  <p className={`score-delta ${scoreDirection}`}>
+                    <span aria-hidden="true">{scoreDirection === 'up' ? '▲' : '▼'}</span>
+                    {formatDelta(scoreDelta)} vs. older average
+                    <span className="older-rating"> ({olderRating})</span>
+                  </p>
+                ) : (
+                  <p className="score-grade muted">Your first analysis. An older average will appear after your next check.</p>
+                )}
 
                 <div className="focus">
                   <h3>Work on these first</h3>
@@ -491,7 +578,7 @@ export function ProfileCheckPage() {
                     {focusAreas.map((m) => (
                       <li key={m.key}>
                         <span>{m.name}</span>
-                        <b>{Math.round(currentOf(m))}</b>
+                        <b>{Math.round(m.val)}</b>
                       </li>
                     ))}
                   </ul>
@@ -510,9 +597,10 @@ export function ProfileCheckPage() {
               <h2>Breakdown</h2>
               <ul className="breakdown-list">
                 {metrics.map((m, index) => {
-                  const paletteKey = `c${(index % 10) + 1}` as keyof typeof COLOR_MAP
-                  const palette = COLOR_MAP?.[paletteKey] ?? FALLBACK_PALETTE
-                  const delta = currentOf(m) - previousOf(m)
+                  const colorStyle = getBarStyle(index, hasOlderData ? 1 : 0, hasOlderData ? 2 : 1)
+                  const delta = typeof m.olderAverage === 'number'
+                    ? m.val - m.olderAverage
+                    : null
 
                   return (
                     <li
@@ -525,15 +613,15 @@ export function ProfileCheckPage() {
                         <div
                           className="breakdown-fill"
                           style={{
-                            width: graphVisible ? `${toBarHeight(currentOf(m))}%` : '0%',
-                            background: palette.v1,
+                            width: graphVisible ? `${toBarHeight(m.val)}%` : '0%',
+                            ...colorStyle,
                             transitionDelay: `${index * 70}ms`,
                           }}
                         />
                       </div>
-                      <b className="breakdown-value">{Math.round(currentOf(m))}</b>
-                      <span className={`delta-chip ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
-                        {formatDelta(delta)}
+                      <b className="breakdown-value">{Math.round(m.val)}</b>
+                      <span className={`delta-chip ${delta === null ? 'flat' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
+                        {delta === null ? 'New' : formatDelta(delta)}
                       </span>
                     </li>
                   )

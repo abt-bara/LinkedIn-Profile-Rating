@@ -8,30 +8,29 @@ export type OpenIdUser = {
   [key: string]: unknown
 }
 
-export type Metric = {
-  name: string
-  val: number
-  oldval?: number
-}
-
-export type GraphData = Record<string, Metric>
-
-export type AnalyzeResponse = {
-  analysisResult: unknown
-  graphData: GraphData
+export type AnalysisRecord = {
+  id: string
+  user_id: string
+  created_at: string
+  completeness: number
+  content_quality: number
+  keyword_and_role_relevance: number
+  career_trajectory: number
+  skills_depth: number
+  social_proof: number
+  network: number
+  activity: number
 }
 
 export const COLOR_MAP = {
-  c1: { v1: '#0A66C2', v2: '#9DC9ED' },
-  c2: { v1: '#004182', v2: '#8BBBE8' },
-  c3: { v1: '#2867B2', v2: '#A8CDEE' },
-  c4: { v1: '#378FE9', v2: '#B7DCF8' },
-  c5: { v1: '#155A9C', v2: '#90BDEB' },
-  c6: { v1: '#0B5394', v2: '#9BC5EC' },
-  c7: { v1: '#5A9BD5', v2: '#C1DDF5' },
-  c8: { v1: '#1D70B7', v2: '#A4CCED' },
-  c9: { v1: '#3F83C5', v2: '#B3D4F1' },
-  c10: { v1: '#0A4F8F', v2: '#91BCE6' },
+  c1: '#0A66C2',
+  c2: '#004182',
+  c3: '#2867B2',
+  c4: '#378FE9',
+  c5: '#155A9C',
+  c6: '#0B5394',
+  c7: '#5A9BD5',
+  c8: '#1D70B7',
 } as const
 
 export class HttpError extends Error {
@@ -49,9 +48,10 @@ export interface ApiClient {
   post(path: string, body: unknown): Promise<unknown>
 }
 
-async function readResponse(response: Response): Promise<unknown> {
+async function readResponse(response: Response, responseType: 'auto' | 'text'): Promise<unknown> {
   const text = await response.text()
   if (!text) return null
+  if (responseType === 'text') return text
 
   try {
     return JSON.parse(text) as unknown
@@ -81,7 +81,9 @@ export class HttpClient implements ApiClient {
   async request(
     path: string,
     init: RequestInit = {},
-    options: { includeCredentials?: boolean } = { includeCredentials: true },
+    options: { includeCredentials?: boolean; responseType?: 'auto' | 'text' } = {
+      includeCredentials: true,
+    },
   ): Promise<unknown> {
     const headers = new Headers(init.headers)
     const hasBody = typeof init.body !== 'undefined'
@@ -112,7 +114,9 @@ export class HttpClient implements ApiClient {
       throw new HttpError('Authentication required.', 401)
     }
 
-    const body = await readResponse(response)
+    const responseType =
+      options.responseType === 'text' && response.ok ? 'text' : 'auto'
+    const body = await readResponse(response, responseType)
 
     if (!response.ok) {
       throw new HttpError(
@@ -162,58 +166,70 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function parseGraphData(value: unknown): GraphData {
-  if (!isRecord(value)) {
-    throw new Error('The analysis service returned invalid graph data.')
+function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
+  if (!Array.isArray(value)) {
+    throw new Error('The analysis history service returned an invalid response.')
   }
 
-  const graph: GraphData = {}
-
-  for (const [key, metricValue] of Object.entries(value)) {
-    if (!isRecord(metricValue)) {
-      throw new Error('The analysis service returned invalid graph data.')
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new Error('The analysis history service returned an invalid response.')
     }
 
-    const { name, val, oldval } = metricValue
+    const { id, user_id, created_at } = entry
     if (
-      (typeof name !== 'undefined' && typeof name !== 'string') ||
-      typeof val !== 'number' ||
-      !Number.isFinite(val) ||
-      (typeof oldval !== 'undefined' &&
-        (typeof oldval !== 'number' || !Number.isFinite(oldval)))
+      typeof id !== 'string' ||
+      typeof user_id !== 'string' ||
+      typeof created_at !== 'string' ||
+      !Number.isFinite(Date.parse(created_at))
     ) {
-      throw new Error('The analysis service returned invalid graph data.')
+      throw new Error('The analysis history service returned an invalid response.')
     }
 
-    graph[key] = {
-      name: typeof name === 'string' ? name : key,
-      val,
-      ...(typeof oldval === 'number' ? { oldval } : {}),
+    const readScore = (field: keyof Omit<AnalysisRecord, 'id' | 'user_id' | 'created_at'>) => {
+      const score = entry[field]
+      if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 100) {
+        throw new Error('The analysis history service returned invalid scores.')
+      }
+      return score
     }
-  }
 
-  return graph
+    return {
+      id,
+      user_id,
+      created_at,
+      completeness: readScore('completeness'),
+      content_quality: readScore('content_quality'),
+      keyword_and_role_relevance: readScore('keyword_and_role_relevance'),
+      career_trajectory: readScore('career_trajectory'),
+      skills_depth: readScore('skills_depth'),
+      social_proof: readScore('social_proof'),
+      network: readScore('network'),
+      activity: readScore('activity'),
+    }
+  })
 }
 
-function parseAnalyzeResponse(value: unknown): AnalyzeResponse {
-  if (!isRecord(value) || !('analysisResult' in value) || !('graphData' in value)) {
-    throw new Error('The analysis service returned an invalid response.')
-  }
-
-  return {
-    analysisResult: value.analysisResult,
-    graphData: parseGraphData(value.graphData),
-  }
-}
-
-export async function analyze(file: File): Promise<AnalyzeResponse> {
+export async function analyze(file: File): Promise<string> {
   const formData = new FormData()
   formData.append('file', file)
 
   const response = await httpClient.request('/analyze', {
     method: 'POST',
     body: formData,
-  })
+  }, { responseType: 'text' })
 
-  return parseAnalyzeResponse(response)
+  if (typeof response !== 'string' || !response.trim()) {
+    throw new Error('The analysis service returned an empty text response.')
+  }
+  return response
+}
+
+export async function getAnalyses(limit = 10): Promise<AnalysisRecord[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    throw new Error('Analysis history limit must be between 1 and 10.')
+  }
+
+  const query = new URLSearchParams({ limit: String(limit) })
+  return parseAnalysisHistory(await httpClient.get(`/analyses?${query}`))
 }

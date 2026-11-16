@@ -10,7 +10,7 @@ created: 2026-11-12
 Receives a **LinkedIn profile PDF** and returns:
 
 1. **Scores** for each metric the profile was analyzed on (0–100, where 100 is the top). Example: "you got 70 on skills, 80 on description, 78 on education".
-2. **Nested JSON notes** for the user, with advice grouped by section and sub-topic.
+2. **Plain-text feedback** for the user, with advice grouped by profile section.
 
 
 ## Metrics
@@ -21,16 +21,36 @@ Metrics are specified by the AI service team because they are the ones responsib
 
 ## Output boundary
 
-The AI service produces nested feedback and score data for the gateway. The
-browser-facing `POST /api/analyze` response envelope and graph schema are
-defined centrally in [[overview]]. Keep this page focused on the AI pipeline
-and internal processing rather than duplicating the frontend API contract.
+The AI service provides feedback text and structured score fields to the
+gateway. The gateway stores the score record and returns only plain-text
+feedback to the browser from `POST /api/analyze`; score history is retrieved
+separately through `GET /api/analyses`. The browser-facing contract is in
+[[overview]].
 
 After a successful analysis, the gateway associates the result with the
-authenticated user's `user_id` and stores an `Analysis` record through the
-private [[database-server]]. The AI server does not write directly to the
-database. The DB entity currently described in the diagram has eight named
-scores; confirm its mapping to the AI output before implementing persistence.
+authenticated user's `user_id` and stores the text and scores as an `Analysis`
+record through the private [[database-server]]. The AI server does not write
+directly to the database. The internal AI response must include the eight
+scores defined in [[database-server]] alongside the feedback text.
+
+The gateway expects an internal JSON object shaped like:
+
+```json
+{
+  "analysis_result": "Plain-text profile feedback.",
+  "completeness": 82,
+  "content_quality": 68,
+  "keyword_and_role_relevance": 75,
+  "career_trajectory": 70,
+  "skills_depth": 80,
+  "social_proof": 64,
+  "network": 55,
+  "activity": 72
+}
+```
+
+This internal response is not returned to the browser; the gateway stores the
+scores and returns only `analysis_result` as `text/plain`.
 
 ## Pipeline
 

@@ -34,7 +34,7 @@ flowchart LR
     G --> A[Auth server<br/>sessions and identity]
     G --> L[LinkedIn auth server]
     G --> AI[AI server<br/>FastAPI, local LLM, RAG]
-    G --> DB[DB server<br/>private HTTP CRUD<br/>port TBD]
+    G --> DB[DB server<br/>private HTTP CRUD<br/>port 3003 configured]
   end
   L <-->|OAuth 2.0 / OIDC| LI[(LinkedIn)]
 ```
@@ -58,7 +58,7 @@ flowchart LR
 | Frontend                     | React, TypeScript, Vite, ESLint            |
 | Gateway, Auth, LinkedIn auth | Node.js, Express                           |
 | AI                           | Python, FastAPI, local LLM, RAG            |
-| Database API                 | Separate HTTP service; implementation and port TBD |
+| Database API                 | Separate HTTP service; port 3003 configured; implementation pending |
 | Data                         | `User` and `Analysis` entities; storage engine TBD |
 | Edge                         | nginx plus a tunnel to localhost           |
 | Identity                     | LinkedIn OAuth 2.0 authorization-code flow |
@@ -70,7 +70,7 @@ flowchart LR
 ├── Backend/
 │   ├── ai server/
 │   ├── auth server/
-│   ├── db server/       <- planned; separate process and port
+│   ├── db server/       <- planned separate process; port 3003 configured
 │   ├── edge server/
 │   ├── gateway/
 │   └── LinkedIn-auth-server/
@@ -162,26 +162,54 @@ Session cookie and `multipart/form-data` with one `file` field containing the pr
 
 **Response**
 
-`200 OK` with JSON containing `analysisResult` and `graphData`. `analysisResult` is a JSON value containing the analysis feedback. `graphData` is keyed by metric; each metric has a numeric `val`, an optional numeric `oldval`, and an optional display `name`. `oldval` may be undefined for a user's first check.
+`200 OK` with the analysis feedback as plain text (`Content-Type: text/plain`).
+The response contains no JSON envelope and no graph or score data.
 
-```json
-{
-  "analysisResult": {
-    "Summary": "A concise profile assessment.",
-    "Recommendations": ["Clarify the headline."]
-  },
-  "graphData": {
-    "headline": { "name": "Headline", "val": 82, "oldval": 74 },
-    "experience": { "name": "Experience", "val": 68 }
-  }
-}
+The gateway receives the structured result from the internal AI service,
+persists the feedback and scores as an `Analysis` record owned by the
+authenticated `/api/me` user, then returns only the feedback text to the
+browser. The internal score fields are listed in [[database-server]].
+
+### `GET /api/analyses`
+
+**Request**
+
+Session cookie; no request body. Optional query parameter `limit`: integer
+from 1 to 10; defaults to 10. The frontend requests the latest 10 records.
+
+```text
+GET /api/analyses?limit=10
 ```
 
-For an authenticated request, the gateway sends the validated AI result to the
-DB server as a new `Analysis` record owned by the `/api/me` user before it
-returns the response. The mapping between public `graphData` metric keys and
-the DB server's named score fields must be finalized before persistence is
-implemented; see [[database-server]].
+**Response**
+
+`200 OK` with an array of the authenticated user's analysis records, newest
+first. Each record includes `id`, `user_id`, `created_at`, and the eight
+numeric scores documented in [[database-server]]. The current analysis is
+included as the first record after a successful analysis.
+
+```json
+[
+  {
+    "id": "analysis-123",
+    "user_id": "user-123",
+    "created_at": "2026-11-16T08:30:00Z",
+    "completeness": 82,
+    "content_quality": 68,
+    "keyword_and_role_relevance": 75,
+    "career_trajectory": 70,
+    "skills_depth": 80,
+    "social_proof": 64,
+    "network": 55,
+    "activity": 72
+  }
+]
+```
+
+The frontend displays the newest record as **Current**. For each metric, it
+calculates one **Older average** bar from the remaining returned records,
+excluding the current record. With only one record, no older-average bar is
+shown. The overall older rating is calculated from those per-metric averages.
 
 ---
 
@@ -196,8 +224,8 @@ record CRUD belongs to the separate DB server, not the auth server.
 ### Gateway → DB server
 
 The gateway calls the DB server directly over its private HTTP interface for
-`User` and `Analysis` CRUD. The DB server runs as a separate process on its own
-port; the port has not been assigned, and the service is not implemented yet.
+`User` and `Analysis` CRUD. The DB server runs as a separate process on its own port (`3003`, configured
+in the gateway); the service is not implemented yet.
 It is not a browser-facing API and must not be exposed through Vite or the
 public edge proxy.
 
@@ -207,6 +235,11 @@ authorization rules, and implementation gaps are in
 [[database-server]]. In particular, the gateway must pass trusted actor
 identity (`id` and `role`) for updates, and the DB server must enforce the
 rules independently.
+
+The gateway's analysis endpoints use the DB server's internal
+`POST /internal/v1/analyses` to persist each scored result and
+`GET /internal/v1/analyses?limit=N` to retrieve a bounded history for the
+authenticated user.
 
 ### Gateway → LinkedIn auth server
 
@@ -250,12 +283,14 @@ the DB server. The LinkedIn auth server does not own user-record CRUD.
 
 ### Gateway → AI server
 
-**`/api/get-analysis-result`**
+**`POST /api/analyze`**
 
-- Request: gateway forwards the authenticated user's PDF for analysis.
-- Response: analysis result and scores. The gateway associates the result with
-  the authenticated `user_id` and persists an `Analysis` record through the
-  DB server before returning the browser-facing response.
+- Request: gateway forwards the authenticated user's PDF as multipart data.
+- Internal response: JSON with `analysis_result` as text and the eight score
+  fields in [[database-server]]. The gateway validates and persists this
+  record for the authenticated `user_id`.
+- Browser response: the feedback text only (`text/plain`); no JSON envelope
+  or score data is returned by this route.
 
 ---
 
@@ -267,6 +302,6 @@ the DB server. The LinkedIn auth server does not own user-record CRUD.
 - For DB mutations, the gateway passes the authenticated actor's `id` and
   `role`; it must derive these from `/api/me`, not from browser-supplied data.
   The DB server independently validates authorization and field-level rules.
-- The DB server's port, storage engine, and implementation are not yet set.
+- The DB server's storage engine and implementation are not yet set.
   See [[database-server]] for the proposed contract and outstanding schema
   decisions.

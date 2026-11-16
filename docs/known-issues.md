@@ -18,7 +18,7 @@ Debug from the outside in:
 - [ ] Is the **tunnel** up? Check the SSH or tunnel process on the local machine.
 - [ ] Does the **edge port** respond on the edge host? `curl -i http://127.0.0.1:8080/` there.
 - [ ] Does nginx `proxy_pass` point to that same port? Check the nginx error log.
-- [ ] Is the **gateway** really listening on the local port (`ss -ltnp | grep 3000`)?
+- [ ] Is the **gateway** really listening on the local port (`ss -ltnp | grep 3001`)?
 - [ ] Does the gateway reach the [[linkedin-auth-server]]? Check its logs for connection errors.
 - [ ] Is the `/api/signin` route proxied to the right upstream?
 

@@ -1,5 +1,6 @@
 {
   "name": "gateway",
+  "type":"module",
   "version": "1.0.0",
   "description": "<h1>Gateway:</h1> <h4>Public Express server accessible from the frontend:</h4> <h3>LinkedIn Sign: in, up workflow</h3> <a href=\"/docs/Linked_auth_activity_diagram.svg\">Check activity diagram for workflow  </a>",
   "main": "index.js",
@@ -11,7 +12,9 @@
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.6",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19"

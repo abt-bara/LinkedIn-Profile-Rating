@@ -113,19 +113,23 @@ gateway's redirect when the session is missing.
 
 ### Profile dashboard
 
-`src/pages/ProfileCheckPage.tsx` starts with an empty score view. It receives
-metrics from `graphData` after a successful PDF analysis and displays:
+`src/pages/ProfileCheckPage.tsx` loads up to the latest 10 saved analyses from
+`GET /api/analyses?limit=10`. It displays:
 
-- a previous/current grouped chart, with scores clamped to 0–100 visually;
+- a grouped 2D chart with one current bar and at most one older-average bar per
+  metric; bar height is clamped to 0–100 visually;
 - an overall score calculated as the rounded arithmetic mean of each metric's
-  current score (`val`, falling back to `oldval`);
-- comparison with the prior values (`oldval`, falling back to the current
-  value when no prior value exists);
+  current score;
+- an older rating calculated from the per-metric averages of returned history,
+  excluding the newest/current analysis;
 - the two lowest-scoring focus areas and a per-metric breakdown;
-- an empty prompt before analysis, plus upload progress and error states.
+- an empty prompt before the first analysis, plus history loading/error and
+  upload progress/error states.
 
-Refreshing the page clears the displayed metrics until the next successful
-analysis. The gateway is planned to persist each result in the DB server, but
+The latest analysis is the first record; earlier records are aggregated into
+one older-average value per metric. If there are no earlier records, only the
+current bar is shown. Refreshing the page reloads the latest history from the
+gateway. The gateway is planned to persist each result in the DB server, but
 the current browser contract does not include a read-history route, so the
 frontend does not reload stored analyses after refresh.
 
@@ -138,9 +142,12 @@ These checks are convenience only: the backend must independently validate
 the file type, content, and size.
 
 The request contains one multipart field named `file`. While it is in flight,
-the UI shows a busy state and skeleton. On success, the frontend renders
-`analysisResult` recursively and replaces the dashboard metrics with
-`graphData`. Invalid responses or failed requests are shown as upload errors.
+the UI shows a busy state and skeleton. On success, `POST /api/analyze`
+returns plain-text feedback, which the frontend displays as text. It then
+reloads the latest saved analyses through `GET /api/analyses?limit=10` to
+update the current and older-average bars. The analyze response contains no
+score payload or JSON response envelope. Invalid responses or failed requests
+are shown as errors.
 
 The PDF-help dialog provides steps for LinkedIn's profile **More → Save to
 PDF** action. It can be dismissed with Escape or the close button and returns
@@ -198,7 +205,7 @@ npm run preview
 ```
 
 During development, Vite proxies `/api/*` to
-`VITE_API_PROXY_TARGET`, defaulting to `http://localhost:3000`. To use another
+`VITE_API_PROXY_TARGET`, defaulting to `http://localhost:3001`. To use another
 local gateway:
 
 ```dotenv

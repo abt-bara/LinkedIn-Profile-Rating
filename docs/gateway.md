@@ -47,10 +47,15 @@ browser-facing request and response remain the `/api/analyze` contract in
 
 ## Ports and exposure
 
-The frontend's Vite proxy defaults to the gateway at `http://localhost:3000`.
-The DB server will have a different, private port; its value and service URL
-are not implemented yet. Do not proxy the DB port through Vite or the edge
-server.
+The frontend's Vite proxy defaults to the gateway at `http://localhost:3001`.
+The DB server uses a different, private port (`3003` in
+`Backend/gateway/config/config.json`). Do not proxy the DB port through Vite or
+the edge server.
+
+The analysis routes require `DB_SERVICE_TOKEN` in the gateway environment.
+The gateway sends it only to the DB server as a bearer token; it is never
+returned to the browser. The DB server must be configured with the
+corresponding credential.
 
 The checked-in `Backend/gateway/server.js` is currently a minimal Express
 stub: it listens on port `3000` and only exposes `GET /`. The routing,

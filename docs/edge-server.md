@@ -11,7 +11,7 @@ created: 2026-11-12
 `localhost` has no internet-facing address, so nobody outside the machine can reach it. The **edge server** is a public server running **nginx**. It receives internet traffic and forwards it through a **tunnel** to the local [[gateway]]. To the outside world the edge *is* the application, and the local machine stays hidden behind it (a reverse proxy that masks the session path).
 
 ```
-Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► localhost:3000 (Gateway)
+Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► localhost:3001 (Gateway)
 ```
 
 ## Responsibilities
@@ -44,7 +44,7 @@ Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► local
 Tunnel from the local machine (reverse SSH example):
 
 ```bash
-ssh -N -R 127.0.0.1:8080:localhost:3000 \
+ssh -N -R 127.0.0.1:8080:localhost:3001 \
     -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
     tunnel@edge-host
 ```
