@@ -217,9 +217,10 @@ shown. The overall older rating is calculated from those per-metric averages.
 
 ### Gateway → Auth server
 
-The gateway calls the auth server to validate the browser's session and obtain
-the authenticated user's `id` and `role` (`GET /api/me`). User and analysis
-record CRUD belongs to the separate DB server, not the auth server.
+This gateway calls the Auth service to ask it for users permissions.
+the service returns 200 403 or 404.
+`/api/me` is the only needed route, it passes a session cookie in the header.
+
 
 ### Gateway → DB server
 

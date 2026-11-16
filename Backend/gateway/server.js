@@ -4,11 +4,11 @@ import config from "./config/config.json" with { type: "json" };
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import createAnalysisRouter from "./routers/analysis.js";
-import linkedInRouter from "./routers/linkedIn.js";
 
+import linkedInRouter from "./routers/linkedIn.js";
 // ---- Config: validate once, fail early with a clear message ----
-const PORT = config.server_port.gateway; 
-const ORIGIN = config.server_url.gateway; 
+const PORT = config.server_port.gateway;
+const ORIGIN = config.server_url.gateway;
 // Ensure BasePath never starts with a slash to avoid double-slash bugs
 const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
 
@@ -71,6 +71,58 @@ app.get("/", (req, res) => res.redirect("/api-docs"));
  *         description: LinkedIn auth server unreachable
  */
 app.use(`/${BasePath}`, linkedInRouter);
+/**
+ * @openapi
+ * /api/me:
+ *   get:
+ *     tags:
+ *       - Authentication
+ *     summary: Get authenticated user information
+ *     description: Retrieves the authenticated user's information from the authentication server using the session cookie.
+ *     operationId: getCurrentUser
+ *     security:
+ *       - sessionCookie: []
+ *     responses:
+ *       200:
+ *         description: User information retrieved successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               additionalProperties: true
+ *       401:
+ *         description: User is not authenticated or the session is invalid.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: User is not authorized to access this resource.
+ *       502:
+ *         description: Authentication server is unreachable.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+app.get(`/${BasePath}/me`, async (req, res) => {
+  try {
+    const r = await fetch(`${config.server_url.auth_server}/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${req.cookies.user_id}` },
+      body: { action: req.json?.action },
+    });
+
+    if (!r.ok) {
+      return res.status(r.status).json({ error: "Unauthorized" });
+    }
+
+    res.status(200);
+  } catch (error) {
+    console.error("Error fetching user data:", error);
+    res.status(502).json({ error: "Authentication server unreachable" });
+  }
+});
 
 /**
  * @openapi
