@@ -158,17 +158,39 @@ Any `2xx` status after the session is invalidated and the cookie is cleared. The
 
 **Request**
 
-Session cookie and `multipart/form-data` with one `file` field containing the profile PDF.
+Requires the session cookie established by sign-in. Send the profile PDF as
+`multipart/form-data` in a single field named `file`:
 
-**Response**
+```text
+POST /api/analyze
+Content-Type: multipart/form-data
 
-`200 OK` with the analysis feedback as plain text (`Content-Type: text/plain`).
-The response contains no JSON envelope and no graph or score data.
+file: <profile PDF>
+```
+
+The frontend rejects files that are not reported as `application/pdf` or are
+larger than 15 MiB before uploading. The server must validate the upload
+independently.
+
+**Successful response**
+
+`200 OK` with the analysis feedback as plain text
+(`Content-Type: text/plain`). The response has no JSON envelope, score data,
+or graph data.
 
 The gateway receives the structured result from the internal AI service,
 persists the feedback and scores as an `Analysis` record owned by the
 authenticated `/api/me` user, then returns only the feedback text to the
-browser. The internal score fields are listed in [[database-server]].
+browser. The internal score fields are listed in [[database-server]]. The
+frontend then requests `GET /api/analyses?limit=10` to refresh score history.
+
+**Failure behavior**
+
+- `401` when the request has no valid session.
+- `403` when the request is forbidden. The frontend redirects to `/auth` on
+  any API `403`, including one returned by `GET /api/me`.
+- `415` when the request is not a multipart upload.
+- `502` when a required downstream service fails or returns an invalid result.
 
 ### `GET /api/analyses`
 

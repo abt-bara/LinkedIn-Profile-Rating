@@ -1,186 +1,142 @@
 import { Router } from "express";
+import config from "../../shared/config/config.json" with { type: "json" };
+import { authorize } from "../services/authenticateUser.js";
+import { ACTIONS } from "../../shared/data/actions.js";
+const router = Router();
+const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
 
-const HISTORY_LIMIT_MAX = 10;
-const SCORE_FIELDS = [
-  "completeness",
-  "content_quality",
-  "keyword_and_role_relevance",
-  "career_trajectory",
-  "skills_depth",
-  "social_proof",
-  "network",
-  "activity",
-];
-
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function readJson(response) {
-  const text = await response.text();
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  }
-}
-
-export default function createAnalysisRouter({ authServerUrl, dbServerUrl, aiServerUrl }) {
-  const router = Router();
-
-  async function getAuthenticatedUser(req, res) {
-    const cookie = req.get("cookie");
-    if (!cookie) {
-      res.status(401).json({ message: "Authentication required." });
-      return null;
-    }
-
-    const sessionResponse = await fetch(new URL("/api/me", authServerUrl), {
-      headers: { cookie },
-      redirect: "manual",
+/**
+ * @openapi
+ * /api/analyze:
+ *   post:
+ *     summary: Analyze data
+ *     description: Forwards an analysis request to the internal AI server. Requires authorization.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             additionalProperties: true
+ *     responses:
+ *       200:
+ *         description: Successful analysis response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               additionalProperties: true
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Forbidden
+ */
+router.post(
+  `/${BasePath}/analyze`,
+  authorize(ACTIONS.analysisCreate),
+  async (req, res) => {
+    const r = await fetch(`${config.server_url.ai_server}/analyze`, {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data" },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(30000),
     });
-    if (!sessionResponse.ok) {
-      const isUnauthenticated =
-        sessionResponse.status === 401 ||
-        (sessionResponse.status >= 300 && sessionResponse.status < 400);
-      res.status(isUnauthenticated ? 401 : 502).json({
-        message: isUnauthenticated
-          ? "Authentication required."
-          : "Could not validate the current session.",
-      });
-      return null;
-    }
+    if (r.status === 403) return res.status(403).json({ error: "Forbidden" });
+    if (!r.ok) return res.status(401).json({ error: "Unauthorized" });
+    res.status(200).json(await r.json());
+  },
+);
 
-    const user = await readJson(sessionResponse);
-    if (!isRecord(user) || typeof user.id !== "string" || typeof user.role !== "string") {
-      throw new Error("Auth service returned an invalid session user.");
-    }
-    return user;
-  }
+/**
+ * @openapi
+ * /api/analyses:
+ *   get:
+ *     summary: List analyses
+ *     description: Retrieves a list of analyses for the authenticated user.
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         required: false
+ *         description: Maximum number of analyses to return.
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *     responses:
+ *       200:
+ *         description: A list of analyses retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 additionalProperties: true
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Unauthorized
+ *       404:
+ *         description: Not Found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Not Found
+ */
+router.get(
+  `/${BasePath}/analyses`,
+  authorize(ACTIONS.analysisList),
+  async (req, res) => {
+    const me = await fetch(`${config.server_url.auth_server}/me`, {
+      headers: { cookie: req.headers.cookie ?? "" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!me.ok) return res.status(401).json({ error: "Unauthorized" });
+    const user_data = await me.json();
 
-  function getDbServiceToken(res) {
-    const serviceToken = process.env.DB_SERVICE_TOKEN;
-    if (!serviceToken) {
-      console.error("DB_SERVICE_TOKEN is not configured.");
-      res.status(503).json({ message: "Analysis storage is not configured." });
-      return null;
-    }
-    return serviceToken;
-  }
+    // Use req.query.limit instead of req.params.limit
+    const limit = req.query.limit;
 
-  router.get("/analyses", async (req, res) => {
-    const rawLimit = req.query.limit ?? String(HISTORY_LIMIT_MAX);
-    const limit = typeof rawLimit === "string" ? Number(rawLimit) : NaN;
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > HISTORY_LIMIT_MAX) {
-      return res.status(400).json({
-        message: `limit must be an integer between 1 and ${HISTORY_LIMIT_MAX}.`,
-      });
-    }
+    // Build the target URL properly with query params (or pass body if your db server expects it, 
+    // but note that standard GET requests typically shouldn't have a body).
+    const targetUrl = new URL(`${config.server_url.db_server}/analyses`);
+    targetUrl.searchParams.append('userId', user_data.id);
+    if (limit) targetUrl.searchParams.append('limit', limit);
 
-    try {
-      const user = await getAuthenticatedUser(req, res);
-      if (!user) return;
+    const r = await fetch(targetUrl, {
+      method: "GET",
+      headers: { cookie: req.headers.cookie ?? "" },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) return res.status(404).json({ error: "Not Found" });
 
-      const serviceToken = getDbServiceToken(res);
-      if (!serviceToken) return;
-      const analysesUrl = new URL("/internal/v1/analyses", dbServerUrl);
-      analysesUrl.searchParams.set("limit", String(limit));
-
-      const analysesResponse = await fetch(analysesUrl, {
-        headers: {
-          authorization: `Bearer ${serviceToken}`,
-          "x-actor-id": user.id,
-          "x-actor-role": user.role,
-        },
-      });
-      const body = await readJson(analysesResponse);
-
-      if (!analysesResponse.ok) {
-        console.error(`DB service returned ${analysesResponse.status} for analysis history.`);
-        return res.status(502).json({ message: "Could not load analysis history." });
-      }
-      if (!Array.isArray(body)) {
-        console.error("DB service returned an invalid analysis history response.");
-        return res.status(502).json({ message: "Could not load analysis history." });
-      }
-
-      return res.status(200).json(body);
-    } catch (error) {
-      console.error("Analysis history request failed:", error);
-      return res.status(502).json({ message: "Could not load analysis history." });
-    }
-  });
-
-  router.post("/analyze", async (req, res) => {
-    const contentType = req.get("content-type") ?? "";
-    if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
-      return res.status(415).json({ message: "Expected a multipart PDF upload." });
-    }
-
-    try {
-      const user = await getAuthenticatedUser(req, res);
-      if (!user) return;
-
-      const serviceToken = getDbServiceToken(res);
-      if (!serviceToken) return;
-
-      const aiResponse = await fetch(new URL("/api/analyze", aiServerUrl), {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": contentType,
-        },
-        body: req,
-        duplex: "half",
-      });
-
-      if (!aiResponse.ok) {
-        console.error(`AI service returned ${aiResponse.status} for profile analysis.`);
-        return res.status(aiResponse.status >= 400 && aiResponse.status < 500 ? aiResponse.status : 502)
-          .json({ message: "The profile could not be analyzed." });
-      }
-
-      const analysis = await readJson(aiResponse);
-      if (
-        !isRecord(analysis) ||
-        typeof analysis.analysis_result !== "string" ||
-        !analysis.analysis_result.trim() ||
-        SCORE_FIELDS.some((field) => {
-          const score = analysis[field];
-          return typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100;
-        })
-      ) {
-        console.error("AI service returned an invalid analysis response.");
-        return res.status(502).json({ message: "The analysis service returned invalid results." });
-      }
-
-      const analysisRecord = { analysis_result: analysis.analysis_result };
-      for (const field of SCORE_FIELDS) analysisRecord[field] = analysis[field];
-
-      const dbResponse = await fetch(new URL("/internal/v1/analyses", dbServerUrl), {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${serviceToken}`,
-          "content-type": "application/json",
-          "x-actor-id": user.id,
-          "x-actor-role": user.role,
-        },
-        body: JSON.stringify({ analysis: analysisRecord }),
-      });
-      if (!dbResponse.ok) {
-        console.error(`DB service returned ${dbResponse.status} while saving an analysis.`);
-        return res.status(502).json({ message: "The analysis could not be saved." });
-      }
-
-      return res.status(200).type("text/plain").send(analysis.analysis_result);
-    } catch (error) {
-      console.error("Profile analysis request failed:", error);
-      return res.status(502).json({ message: "The profile could not be analyzed." });
-    }
-  });
-
-  return router;
-}
+    res.status(200).json(await r.json());
+  },
+);
+export default router;

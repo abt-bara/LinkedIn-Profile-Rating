@@ -1,7 +1,8 @@
 import { Router } from "express";
-import config from "../config/config.json" with { type: "json" };
+import config from "../../shared/config/config.json" with { type: "json" };
 
 const router = Router();
+const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
 
 const LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization";
 const PARAM_KEYS = ["response_type", "client_id", "redirect_uri", "state", "scope"];

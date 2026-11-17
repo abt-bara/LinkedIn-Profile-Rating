@@ -174,7 +174,8 @@ The client reads an empty response as `null`, parses JSON when possible, and
 otherwise returns the response text. For non-2xx responses it throws
 `HttpError`, using a non-empty JSON `message`, non-empty text body, or a
 status-based fallback message, in that order. The client does not retry
-requests or define an application-level timeout.
+requests or define an application-level timeout. A `403` response redirects
+the browser to `/auth` unless it is already there.
 
 For JSON API requests, the gateway should return a non-2xx status and a safe
 JSON body such as

@@ -103,6 +103,14 @@ export class HttpClient implements ApiClient {
     })
 
     if (
+      response.status === 403 &&
+      typeof window !== 'undefined' &&
+      window.location.pathname !== '/auth'
+    ) {
+      window.location.replace('/auth')
+    }
+
+    if (
       path === '/me' &&
       response.redirected &&
       response.url &&
