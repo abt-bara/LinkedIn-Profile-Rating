@@ -1,16 +1,18 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import config from "./config/config.json" with { type: "json" };
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import createAnalysisRouter from "./routers/analysis.js";
-
 import linkedInRouter from "./routers/linkedIn.js";
+
 // ---- Config: validate once, fail early with a clear message ----
 const PORT = config.server_port.gateway;
 const ORIGIN = config.server_url.gateway;
 // Ensure BasePath never starts with a slash to avoid double-slash bugs
 const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
+const SESSION_COOKIE = "user_id";
 
 if (!Number.isInteger(PORT)) {
   throw new Error(
@@ -20,6 +22,7 @@ if (!Number.isInteger(PORT)) {
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser()); // fills req.cookies (needed for the oauth_state check)
 
 // ---- CORS ----
 app.use(
@@ -46,7 +49,19 @@ if (process.env.NODE_ENV !== "production") {
       servers: [{ url: ORIGIN }],
       components: {
         securitySchemes: {
-          sessionCookie: { type: "apiKey", in: "cookie", name: "user_id" },
+          sessionCookie: {
+            type: "apiKey",
+            in: "cookie",
+            name: SESSION_COOKIE,
+            description:
+              "Set by the server after sign-in and sent by the browser automatically. The Authorize box cannot set it.",
+          },
+        },
+        schemas: {
+          Error: {
+            type: "object",
+            properties: { error: { type: "string", example: "Unauthorized" } },
+          },
         },
       },
     },
@@ -59,47 +74,35 @@ if (process.env.NODE_ENV !== "production") {
 
 // ---- Routes ----
 app.get("/", (req, res) => res.redirect("/api-docs"));
-/**
- * @openapi
- * /api:
- *   get:
- *     summary: Get LinkedIn auth flow configuration
- *     responses:
- *       200:
- *         description: Auth flow configuration retrieved successfully
- *       502:
- *         description: LinkedIn auth server unreachable
- */
-app.use(`/${BasePath}`, linkedInRouter);
+
+app.use(`/${BasePath}`, linkedInRouter); // /signin, /signin/callback, /check-token
+
 /**
  * @openapi
  * /api/me:
  *   get:
- *     tags:
- *       - Authentication
- *     summary: Get authenticated user information
- *     description: Retrieves the authenticated user's information from the authentication server using the session cookie.
- *     operationId: getCurrentUser
+ *     tags: [Authentication]
+ *     summary: Get the authenticated user
  *     security:
  *       - sessionCookie: []
  *     responses:
  *       200:
- *         description: User information retrieved successfully.
+ *         description: The current user (id, name, given_name, email, role)
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               additionalProperties: true
  *       401:
- *         description: User is not authenticated or the session is invalid.
+ *         description: No valid session
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
  *       403:
- *         description: User is not authorized to access this resource.
+ *         description: Not authorized
  *       502:
- *         description: Authentication server is unreachable.
+ *         description: Authentication server unreachable
  *         content:
  *           application/json:
  *             schema:
@@ -108,20 +111,45 @@ app.use(`/${BasePath}`, linkedInRouter);
 app.get(`/${BasePath}/me`, async (req, res) => {
   try {
     const r = await fetch(`${config.server_url.auth_server}/me`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${req.cookies.user_id}` },
-      body: { action: req.json?.action },
+      headers: { cookie: req.headers.cookie ?? "" }, // forward the browser's cookie by hand
+      redirect: "manual", // a redirect to /auth must not be mistaken for success
+      signal: AbortSignal.timeout(3000),
     });
 
-    if (!r.ok) {
-      return res.status(r.status).json({ error: "Unauthorized" });
-    }
+    if (r.status === 403) return res.status(403).json({ error: "Forbidden" });
+    if (!r.ok) return res.status(401).json({ error: "Unauthorized" });
 
-    res.status(200);
-  } catch (error) {
-    console.error("Error fetching user data:", error);
+    res.status(200).json(await r.json());
+  } catch (err) {
+    console.error("Error fetching user data:", err);
     res.status(502).json({ error: "Authentication server unreachable" });
   }
+});
+
+/**
+ * @openapi
+ * /api/signout:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: End the session
+ *     description: Idempotent. Always clears the cookie, even if it was missing or expired.
+ *     responses:
+ *       204:
+ *         description: Signed out
+ */
+app.post(`/${BasePath}/signout`, async (req, res) => {
+  try {
+    await fetch(`${config.server_url.auth_server}/signout`, {
+      method: "POST",
+      headers: { cookie: req.headers.cookie ?? "" },
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (err) {
+    // Still clear the browser's cookie; the server-side session will expire on its own.
+    console.error("signout upstream failed:", err);
+  }
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
+  res.sendStatus(204);
 });
 
 /**

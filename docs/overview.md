@@ -193,6 +193,7 @@ included as the first record after a successful analysis.
   {
     "id": "analysis-123",
     "user_id": "user-123",
+    "full_name":"yahya ben yahya",
     "created_at": "2026-11-16T08:30:00Z",
     "completeness": 82,
     "content_quality": 68,
@@ -293,7 +294,7 @@ the DB server. The LinkedIn auth server does not own user-record CRUD.
 - Browser response: the feedback text only (`text/plain`); no JSON envelope
   or score data is returned by this route.
 
----
+ 
 
 ## Notes
 

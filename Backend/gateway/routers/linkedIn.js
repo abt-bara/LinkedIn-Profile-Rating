@@ -3,129 +3,121 @@ import config from "../config/config.json" with { type: "json" };
 
 const router = Router();
 
+const LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization";
+const PARAM_KEYS = ["response_type", "client_id", "redirect_uri", "state", "scope"];
+
+const STATE_COOKIE = "oauth_state";
+const STATE_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax", // lax, not strict: LinkedIn returns the user through a cross-site GET
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+};
+
+// Paths exposed by the LinkedIn auth server. Adjust if yours differ.
+const linkedin = (path) => `${config.server_url.linkedin_auth_server}${path}`;
+
 /**
  * @openapi
- * /api/authflow:
+ * /api/signin:
  *   get:
- *     tags:
- *       - LinkedIn Authentication
- *     summary: Get LinkedIn authentication flow configuration
- *     description: Retrieves the LinkedIn OAuth configuration from the LinkedIn authentication server.
- *     operationId: getLinkedInAuthFlow
+ *     tags: [LinkedIn Authentication]
+ *     summary: Start sign-in
+ *     description: Redirects to / when the session cookie is valid, otherwise to LinkedIn's authorization page.
  *     responses:
- *       200:
- *         description: Authentication flow configuration retrieved successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 response_type:
- *                   type: string
- *                   example: code
- *                 client_id:
- *                   type: string
- *                   example: your-linkedin-client-id
- *                 redirect_uri:
- *                   type: string
- *                   example: https://example.com/callback
- *                 state:
- *                   type: string
- *                   example: random-state-value
- *                 scope:
- *                   type: string
- *                   example: openid profile email
+ *       302:
+ *         description: Redirect to / or to LinkedIn
  *       502:
- *         description: LinkedIn authentication server failed or is unreachable.
+ *         description: An upstream server failed or is unreachable
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   example: linkedin auth server unreachable
+ *               $ref: '#/components/schemas/Error'
  */
-router.get("/authflow", async (req, res) => {
+router.get("/signin", async (req, res) => {
   try {
-    const r = await fetch(
-      `${config.server_url.linkedin_auth_server}/authflow`,
-      {
-        signal: AbortSignal.timeout(4000),
-      },
-    );
+    // 1. Returning user: a valid cookie logs them in without LinkedIn.
+    const me = await fetch(`${config.server_url.auth_server}/me`, {
+      headers: { cookie: req.headers.cookie ?? "" },
+      redirect: "manual", // a redirect to /auth must not be mistaken for success
+      signal: AbortSignal.timeout(3000),
+    });
+    if (me.ok) return res.redirect("/");
 
+    // 2. Otherwise start the authorization flow.
+    const r = await fetch(linkedin("/authflow"), {
+      signal: AbortSignal.timeout(4000),
+    });
     if (!r.ok) {
-      return res.status(502).json({
-        error: "linkedin auth server failed",
-      });
+      return res.status(502).json({ error: "linkedin auth server failed" });
     }
 
-    const { response_type, client_id, redirect_uri, state, scope } =
-      await r.json();
+    const params = await r.json();
+    const missing = PARAM_KEYS.filter((k) => !params[k]);
+    if (missing.length) {
+      return res.status(502).json({ error: `authflow missing: ${missing.join(", ")}` });
+    }
 
-    res.json({ response_type, client_id, redirect_uri, state, scope });
-  } catch {
-    res.status(502).json({
-      error: "linkedin auth server unreachable",
+    // 3. Bind `state` to this browser; the callback compares it with the query string.
+    res.cookie(STATE_COOKIE, params.state, {
+      ...STATE_COOKIE_OPTIONS,
+      maxAge: 10 * 60 * 1000,
     });
+
+    // 4. Go to LinkedIn (encodeURIComponent keeps spaces in scope as %20).
+    const query = PARAM_KEYS.map((k) => `${k}=${encodeURIComponent(params[k])}`).join("&");
+    res.redirect(`${LINKEDIN_AUTHORIZE_URL}?${query}`);
+  } catch (err) {
+    console.error("signin failed:", err);
+    res.status(502).json({ error: "upstream server unreachable" });
   }
 });
 
 /**
  * @openapi
- * /api/callback:
- *   post:
- *     tags:
- *       - LinkedIn Authentication
- *     summary: Handle LinkedIn OAuth callback
- *     description: Forwards the LinkedIn OAuth callback payload to the LinkedIn authentication server.
- *     operationId: handleLinkedInCallback
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             additionalProperties: true
- *           example:
- *             code: authorization-code
- *             state: random-state-value
+ * /api/signin/callback:
+ *   get:
+ *     tags: [LinkedIn Authentication]
+ *     summary: LinkedIn redirects the browser here after consent
+ *     parameters:
+ *       - { in: query, name: code, schema: { type: string } }
+ *       - { in: query, name: state, schema: { type: string } }
+ *       - { in: query, name: error, schema: { type: string } }
  *     responses:
- *       200:
- *         description: LinkedIn callback processed successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               additionalProperties: true
- *       500:
- *         description: LinkedIn authentication server returned an error.
- *       502:
- *         description: LinkedIn authentication server is unreachable.
+ *       302:
+ *         description: Redirect to / with a session cookie on success, or to /auth on any failure
  */
-router.post("/callback", async (req, res) => {
+router.get("/signin/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  const expected = req.cookies?.[STATE_COOKIE];
+
+  res.clearCookie(STATE_COOKIE, STATE_COOKIE_OPTIONS); // single use, whatever happens next
+
+  if (
+    error ||
+    typeof code !== "string" ||
+    typeof state !== "string" ||
+    !expected ||
+    state !== expected
+  ) {
+    return res.redirect("/auth");
+  }
+
   try {
-    const response = await fetch(
-      `${config.server_url.linkedin_auth_server}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(req.body),
-      },
-    );
-
-    if (!response.ok) {
-      return res.status(500).json({
-        error: "Internal server error, LinkedIn server failed",
-      });
-    }
-
-    res.status(200).json(await response.json());
-  } catch {
-    res.status(502).json({
-      error: "linkedin auth server unreachable",
+    const r = await fetch(linkedin("/callback"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, state }),
+      signal: AbortSignal.timeout(10000),
     });
+    if (!r.ok) return res.redirect("/auth");
+
+    // TODO: find or create the user through the DB server (not implemented yet).
+    for (const c of r.headers.getSetCookie()) res.append("set-cookie", c); // session cookie created upstream
+    res.redirect("/");
+  } catch (err) {
+    console.error("callback failed:", err);
+    res.redirect("/auth");
   }
 });
 
@@ -133,50 +125,36 @@ router.post("/callback", async (req, res) => {
  * @openapi
  * /api/check-token:
  *   get:
- *     tags:
- *       - LinkedIn Authentication
- *     summary: Check and hydrate LinkedIn token
- *     description: Requests the LinkedIn authentication server to check and hydrate the authentication token.
- *     operationId: checkLinkedInToken
+ *     tags: [LinkedIn Authentication]
+ *     summary: Check and hydrate the LinkedIn token for this session
+ *     security:
+ *       - sessionCookie: []
  *     responses:
  *       200:
- *         description: Token check completed.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: Token hydrated
- *       500:
- *         description: LinkedIn authentication server returned an error.
+ *         description: Token check completed
+ *       201:
+ *         description: Token hydrated
+ *       401:
+ *         description: No valid session
  *       502:
- *         description: LinkedIn authentication server is unreachable.
+ *         description: LinkedIn auth server failed or is unreachable
  */
 router.get("/check-token", async (req, res) => {
   try {
-    const response = await fetch(
-      `${config.server_url.linkedin_auth_server}`,
-      {
-        method: "POST",
-        signal: AbortSignal.timeout(30000),
-      },
-    );
-
-    if (!response.ok) {
-      return res.status(500).json({
-        error: "Internal server error, LinkedIn server failed",
-      });
-    }
-
-    res
-      .status(response.status)
-      .json(response.status === 201 ? { message: "Token hydrated" } : {});
-  } catch {
-    res.status(502).json({
-      error: "linkedin auth server unreachable",
+    const r = await fetch(linkedin("/check-token"), {
+      method: "POST",
+      headers: { cookie: req.headers.cookie ?? "" },
+      signal: AbortSignal.timeout(30000),
     });
+
+    if (r.status === 401) return res.status(401).json({ error: "Unauthorized" });
+    if (!r.ok) return res.status(502).json({ error: "linkedin auth server failed" });
+
+    for (const c of r.headers.getSetCookie()) res.append("set-cookie", c);
+    res.status(r.status).json(r.status === 201 ? { message: "Token hydrated" } : {});
+  } catch (err) {
+    console.error("check-token failed:", err);
+    res.status(502).json({ error: "linkedin auth server unreachable" });
   }
 });
 
