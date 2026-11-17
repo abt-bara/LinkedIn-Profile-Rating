@@ -48,7 +48,7 @@ const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
  *                   example: Forbidden
  */
 router.post(
-  `/${BasePath}/analyze`,
+  `/analyze`,
   authorize(ACTIONS.analysisCreate),
   async (req, res) => {
     const r = await fetch(`${config.server_url.ai_server}/analyze`, {
@@ -109,7 +109,7 @@ router.post(
  *                   example: Not Found
  */
 router.get(
-  `/${BasePath}/analyses`,
+  `/analyses`,
   authorize(ACTIONS.analysisList),
   async (req, res) => {
     const me = await fetch(`${config.server_url.auth_server}/me`, {

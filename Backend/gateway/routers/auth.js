@@ -35,7 +35,7 @@ const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get(`/${BasePath}/me`, async (req, res) => {
+router.get(`/me`, async (req, res) => {
   try {
     const r = await fetch(`${config.server_url.auth_server}/me`, {
       headers: { cookie: req.headers.cookie ?? "" }, // forward the browser's cookie by hand
@@ -64,7 +64,7 @@ router.get(`/${BasePath}/me`, async (req, res) => {
  *       204:
  *         description: Signed out
  */
-router.post(`/${BasePath}/signout`, async (req, res) => {
+router.post(`/signout`, async (req, res) => {
   
   try {
     await fetch(`${config.server_url.auth_server}/signout`, {

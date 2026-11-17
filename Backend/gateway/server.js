@@ -4,7 +4,6 @@ import cookieParser from "cookie-parser";
 import config from "../shared/config/config.json" with { type: "json" };
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
-import createAnalysisRouter from "./routers/analysis.js";
 import linkedInRouter from "./routers/linkedIn.js";
 import AuthRouter from "./routers/auth.js";
 import AnalysisRouter from "./routers/analysis.js";
