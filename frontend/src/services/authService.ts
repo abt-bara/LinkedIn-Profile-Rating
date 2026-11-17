@@ -1,5 +1,5 @@
 import {
-  getUser,
+  getMe,
   HttpError,
   httpClient,
   type ApiClient,
@@ -62,7 +62,7 @@ export class AuthService {
 
   async getCurrentUser(): Promise<AuthUser | null> {
     try {
-      return parseUser(await getUser())
+      return parseUser(await getMe())
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) return null
       throw error

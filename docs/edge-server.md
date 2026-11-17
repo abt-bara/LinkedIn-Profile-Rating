@@ -5,16 +5,13 @@ tags: [profile-rater, infra, nginx]
 created: 2026-11-12
 ---
 
-# Edge Server
-
-Part of [[architecture]]. Folder: `Backend/edge server`.
 
 ## Purpose
 
 `localhost` has no internet-facing address, so nobody outside the machine can reach it. The **edge server** is a public server running **nginx**. It receives internet traffic and forwards it through a **tunnel** to the local [[gateway]]. To the outside world the edge *is* the application, and the local machine stays hidden behind it (a reverse proxy that masks the session path).
 
 ```
-Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► localhost:3000 (Gateway)
+Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► localhost:3001 (Gateway)
 ```
 
 ## Responsibilities
@@ -24,6 +21,8 @@ Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► local
 - Pass real client info via `X-Forwarded-*` headers.
 - Rate limiting and basic abuse protection (first layer only).
 - Serve a friendly error page when the tunnel is down.
+- Forward public application requests only to the gateway. The DB server has
+  its own private port and must never be exposed as an edge upstream.
 
 ## Reference configuration
 
@@ -45,7 +44,7 @@ Browser ──HTTPS──► Edge (nginx, public IP) ══tunnel══► local
 Tunnel from the local machine (reverse SSH example):
 
 ```bash
-ssh -N -R 127.0.0.1:8080:localhost:3000 \
+ssh -N -R 127.0.0.1:8080:localhost:3001 \
     -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
     tunnel@edge-host
 ```
@@ -53,10 +52,13 @@ ssh -N -R 127.0.0.1:8080:localhost:3000 \
 ## Hardening checklist
 
 - [ ] Firewall: open only 22, 80, 443. The tunnel port stays on loopback.
+- [ ] Keep the DB server port private; allow connections only from trusted
+  backend services, including the gateway.
 - [ ] Dedicated `tunnel` user, no shell, key restricted with `permitlisten="127.0.0.1:8080"`.
 - [ ] Keep the tunnel alive (systemd unit or `autossh`).
 - [ ] Gateway sets `app.set('trust proxy', 1)` and binds `127.0.0.1`.
-- [ ] The LinkedIn **redirect URL** uses the edge's public HTTPS domain (see [[linkedin-app-setup]]).
+- [ ] The LinkedIn **redirect URL** uses the edge's public HTTPS domain and
+  `/api/signin/callback` path (see [[linkedin-app-setup]]).
 
 > [!bug] A 502 on the login page
 > Seen in the UI: "Request failed (502)". It means nginx reached no valid upstream. See [[known-issues]] for a checklist.

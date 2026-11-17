@@ -7,52 +7,64 @@ created: 2026-11-12
 
 # Gateway
 
-Part of [[architecture]]. Folder: `Backend/gateway`. Stack: Express.
+Part of [[overview]].
 
 ## Purpose
 
-The **main entry point** of the application. The browser only ever talks to the gateway (through the [[edge-server]]); the gateway **orchestrates the private servers**:
+The gateway is the application's only public backend API. The edge server
+forwards browser traffic to it; internal service ports are not exposed to the
+browser. The gateway routes and coordinates requests to the auth,
+LinkedIn-auth, AI, and DB servers.
 
-| Route group | Forwards to |
+## Protected request flow
+
+1. Receive the browser request and session cookie.
+2. Validate the session with the auth server's `/api/me` endpoint.
+3. If validation fails, stop; do not call the AI or DB server.
+4. For DB operations, call the private DB-server HTTP API. The DB server runs
+   separately on a port that is not assigned yet.
+5. Return a browser-safe response. Never forward DB stack traces or secrets.
+
+The gateway derives the authenticated user's `id` and `role` from `/api/me`.
+For `PATCH` requests, it passes both values to the DB server as trusted actor
+context; it must not copy actor identity from browser-supplied fields. The DB
+server independently checks the actor, target record, role, and changed
+fields. See [[database-server]] for the proposed internal API contract.
+
+## Service responsibilities
+
+| Downstream service | Gateway responsibility |
 |---|---|
-| Auth and session routes | [[auth-server]] |
-| LinkedIn sign-in routes (`/auth/linkedin`, `/callback`) | [[linkedin-auth-server]] |
-| Analysis routes | [[ai-server]] |
+| Auth server | Validate sessions and provide the authenticated user identity |
+| LinkedIn auth server | Start and complete the LinkedIn authorization-code flow |
+| AI server | Forward a validated PDF for profile analysis |
+| DB server | Directly create, read, partially update, and delete `User` and `Analysis` records |
 
-> [!question] To confirm
-> The project notes mention the gateway orchestrating three private servers (auth, AI, and the LinkedIn auth server). Confirm the final route table and prefixes.
+After an analysis, the gateway associates the AI result with the authenticated
+user and persists an `Analysis` record through the DB server. The public
+browser-facing request and response remain the `/api/analyze` contract in
+[[overview]].
 
-## Responsibilities
+## Ports and exposure
 
-- Single public surface, so the internal servers never need to be exposed.
-- Authenticate requests (validate the session) before routing to protected services.
-- Authorize by role (roles come from [[auth-server]]).
-- CORS allowlist: only the real frontend origin(s).
-- Request limits: body size (PDF up to 15 MB), rate limiting, timeouts.
-- Error mapping: translate upstream failures into clear responses.
+The frontend's Vite proxy defaults to the gateway at `http://localhost:3001`.
+The DB server uses a different, private port (`3003` in
+`Backend/gateway/config/config.json`). Do not proxy the DB port through Vite or
+the edge server.
 
-## Express setup notes
+The analysis routes require `DB_SERVICE_TOKEN` in the gateway environment.
+The gateway sends it only to the DB server as a bearer token; it is never
+returned to the browser. The DB server must be configured with the
+corresponding credential.
 
-```js
-app.set('trust proxy', 1);                 // one proxy hop (the edge)
-app.use(cors({
-  origin: process.env.CORS_ORIGINS.split(','),
-  credentials: true,                       // cookies
-}));
-app.listen(3000, '127.0.0.1', (err) => {   // loopback only; only the tunnel reaches it
-  if (err) throw err;
-});
-```
+The checked-in `Backend/gateway/server.js` is currently a minimal Express
+stub: it listens on port `3000` and only exposes `GET /`. The routing,
+session-validation, and DB calls described above are the target gateway
+behavior and need implementation in that service.
 
-> [!tip]
-> Express does not listen on the public URL. It listens on a local port, and the tunnel and edge map the public domain to it.
+## Public contract
 
-## Questions to think through
-
-- The upload is up to 15 MB. Should the gateway stream the PDF to the AI server, or buffer it? What does each do to memory under load?
-- Which failures should be retried by the gateway, and which should go straight to the user?
-
-## Links
-- Express `cors` middleware: https://expressjs.com/en/resources/middleware/cors.html
-- Express `app.listen`: https://expressjs.com/en/5x/api.html#app.listen
-- API Gateway pattern: https://microservices.io/patterns/apigateway.html
+All browser-to-gateway paths and payloads are maintained centrally in
+[[overview]]. Internal DB routes and their request/response shapes are
+maintained in [[database-server]]; do not duplicate them as public frontend
+routes.

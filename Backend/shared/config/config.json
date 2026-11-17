@@ -1,0 +1,23 @@
+{
+  "server_port": {
+    "frontend": 4173,
+    "gateway": 3001,
+    "auth_server": 3002,
+    "db_server": 3003,
+    "edge_server": 3004,
+    "linkedin_auth_server": 3005,
+    "ai_server": 8000
+  },
+  "server_url": {
+    "frontend": "http://localhost:4173",
+    "gateway": "http://localhost:3001",
+    "auth_server": "http://localhost:3002",
+    "db_server": "http://localhost:3003",
+    "edge_server": "http://localhost:3004",
+    "linkedin_auth_server": "http://localhost:3005",
+    "ai_server": "http://localhost:8000"
+  },
+  "uris": {
+    "gateway": { "base": "api" }
+  }
+}
