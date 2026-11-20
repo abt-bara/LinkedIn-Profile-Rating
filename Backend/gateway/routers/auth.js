@@ -1,20 +1,41 @@
 import { Router } from "express";
 import config from "../../shared/config/config.json" with { type: "json" };
-import { authorize } from "../services/authenticateUser.js";
 const router = Router();
-const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
+const SESSION_COOKIE = "profile_rater_session";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+};
+
+function authHeaders(cookieHeader, includeJson = false) {
+  const token = process.env.AUTH_INTERNAL_TOKEN;
+  if (!token) throw new Error("AUTH_INTERNAL_TOKEN is not configured.");
+  return {
+    ...(includeJson ? { "content-type": "application/json" } : {}),
+    authorization: `Bearer ${token}`,
+    cookie: cookieHeader ?? "",
+  };
+}
+
+function forwardSetCookies(upstream, res) {
+  for (const value of upstream.headers.getSetCookie()) {
+    res.append("set-cookie", value);
+  }
+}
 
 /**
  * @openapi
  * /api/me:
  *   get:
  *     tags: [Authentication]
- *     summary: Get the authenticated user
+ *     summary: Get the current session display name
  *     security:
  *       - sessionCookie: []
  *     responses:
  *       200:
- *         description: The current user (id, name, given_name, email, role)
+ *         description: The display name and minimal role used by the frontend
  *         content:
  *           application/json:
  *             schema:
@@ -35,21 +56,86 @@ const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get(`/${BasePath}/me`, async (req, res) => {
+router.get("/me", async (req, res) => {
   try {
     const r = await fetch(`${config.server_url.auth_server}/me`, {
-      headers: { cookie: req.headers.cookie ?? "" }, // forward the browser's cookie by hand
-      redirect: "manual", // a redirect to /auth must not be mistaken for success
+      headers: authHeaders(req.headers.cookie),
+      redirect: "manual",
       signal: AbortSignal.timeout(3000),
     });
 
-    if (r.status === 403) return res.status(403).json({ error: "Forbidden" });
-    if (!r.ok) return res.status(401).json({ error: "Unauthorized" });
+    if (r.status === 401) return res.status(401).json({ message: "Unauthorized." });
+    if (!r.ok) {
+      return res.status(r.status === 403 || r.status >= 500 ? 502 : r.status).json({
+        message: "Could not check the current session.",
+      });
+    }
 
-    res.status(200).json(await r.json());
+    const body = await r.json();
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      typeof body.displayName !== "string"
+    ) {
+      console.error("Auth server returned an invalid session response.");
+      return res.status(502).json({ message: "Could not check the current session." });
+    }
+    return res.status(200).json({
+      displayName: body.displayName,
+      ...(typeof body.role === "string" ? { role: body.role } : {}),
+    });
   } catch (err) {
-    console.error("Error fetching user data:", err);
-    res.status(502).json({ error: "Authentication server unreachable" });
+    console.error("Error checking current session:", err);
+    return res.status(502).json({ message: "Authentication server unreachable." });
+  }
+});
+
+/**
+ * @openapi
+ * /api/signin:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Sign in with email and password
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       204:
+ *         description: Session cookie issued
+ *       401:
+ *         description: Incorrect email or password
+ *       502:
+ *         description: Authentication service unreachable
+ */
+router.post("/signin", async (req, res) => {
+  try {
+    const r = await fetch(`${config.server_url.auth_server}/signin`, {
+      method: "POST",
+      headers: authHeaders(req.headers.cookie, true),
+      body: JSON.stringify(req.body ?? {}),
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+    });
+    forwardSetCookies(r, res);
+    if (r.status === 204) return res.sendStatus(204);
+
+    const body = await r.json().catch(() => null);
+    return res.status(r.status === 403 || r.status >= 500 ? 502 : r.status).json({
+      message:
+        typeof body?.message === "string"
+          ? body.message
+          : "Sign-in failed.",
+    });
+  } catch (err) {
+    console.error("Sign-in request failed:", err);
+    return res.status(502).json({ message: "Authentication server unreachable." });
   }
 });
 
@@ -59,24 +145,29 @@ router.get(`/${BasePath}/me`, async (req, res) => {
  *   post:
  *     tags: [Authentication]
  *     summary: End the session
- *     description: Idempotent. Always clears the cookie, even if it was missing or expired.
+ *     description: Idempotent for a missing or expired session; reports service failures.
  *     responses:
  *       204:
  *         description: Signed out
  */
-router.post(`/${BasePath}/signout`, async (req, res) => {
-  
+router.post(`/signout`, async (req, res) => {
   try {
-    await fetch(`${config.server_url.auth_server}/signout`, {
+    const r = await fetch(`${config.server_url.auth_server}/signout`, {
       method: "POST",
-      headers: { cookie: req.headers.cookie ?? "" },
+      headers: authHeaders(req.headers.cookie),
       signal: AbortSignal.timeout(3000),
     });
+    if (!r.ok) {
+      return res.status(r.status === 403 || r.status >= 500 ? 502 : r.status).json({
+        message: "Could not end the session.",
+      });
+    }
+    forwardSetCookies(r, res);
+    res.clearCookie(SESSION_COOKIE, COOKIE_OPTIONS);
+    return res.sendStatus(204);
   } catch (err) {
-    // Still clear the browser's cookie; the server-side session will expire on its own.
-    console.error("signout upstream failed:", err);
+    console.error("Sign-out request failed:", err);
+    return res.status(502).json({ message: "Authentication server unreachable." });
   }
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
-  res.sendStatus(204);
 });
 export default router;

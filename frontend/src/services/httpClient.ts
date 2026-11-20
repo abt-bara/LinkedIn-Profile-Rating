@@ -1,13 +1,3 @@
-export type OpenIdUser = {
-  id?: string
-  name?: string
-  given_name?: string
-  family_name?: string
-  email?: string
-  firstName?: string
-  [key: string]: unknown
-}
-
 export type AnalysisRecord = {
   id: string
   user_id: string
@@ -155,8 +145,8 @@ export class HttpClient implements ApiClient {
 
 export const httpClient = new HttpClient()
 
-export async function getMe(): Promise<OpenIdUser> {
-  return httpClient.get('/me') as Promise<OpenIdUser>
+export async function getMe(): Promise<unknown> {
+  return httpClient.get('/me')
 }
 
 export async function sign(payload: Record<string, unknown>): Promise<unknown> {

@@ -1,10 +1,10 @@
 # Profile Rater — Overview
 
-> Profile Rater is a web app where a user signs in with **LinkedIn**, uploads their **LinkedIn profile as a PDF**, and receives a **score out of 100 per profile section** plus **actionable notes**, while tracking progress against their previous check.
+> Profile Rater is a web app where a user signs up once with **LinkedIn**, then signs in with their **email and app password**, uploads their **LinkedIn profile as a PDF**, and receives a **score out of 100 per profile section** plus **actionable notes**.
 
 ## What the user gets
 
-- **Sign in / sign up with LinkedIn only.** The account is created automatically on first login.
+- **One-time sign-up with LinkedIn.** Returning users sign in with their verified LinkedIn email and app password.
 - **Upload a profile PDF** (max 15 MB) and get an analysis.
 - **Seven section scores** (0–100): Headline, About, Experience, Skills, Education, Network, Activity.
 - **An overall score** with the change since the last check (example: 69, up 7 from 62).
@@ -15,12 +15,13 @@
 
 ```mermaid
 flowchart LR
-  A[Landing page] --> B[Continue with LinkedIn]
-  B --> C[LinkedIn consent]
-  C --> D[Dashboard<br/>scores and history]
-  D --> E[Upload profile PDF]
-  E --> F[Analysis result<br/>scores and notes]
-  F --> D
+  A[Auth page] --> B[Set app password]
+  B --> C[One-time LinkedIn verification]
+  C --> D[Email/password sign-in]
+  D --> E[Dashboard<br/>scores and history]
+  E --> F[Upload profile PDF]
+  F --> G[Analysis result<br/>scores and notes]
+  G --> E
 ```
 
 ## System at a glance
@@ -86,27 +87,26 @@ flowchart LR
 
 The Vite proxy forwards these frontend requests to the gateway.
 
-### `GET /api/signin`
+### `POST /api/signup`
 
 **Request**
 
-Top-level browser `GET`; no request body.
+JSON with the app password chosen before LinkedIn verification:
+
+```json
+{ "password": "user-chosen-password" }
+```
+
+The gateway keeps the password out of the OAuth URL. The auth server stores
+only a password hash in Redis, bound to the short-lived OAuth state.
 
 **Response**
 
-`302` redirect to LinkedIn:
+`200 OK` with the LinkedIn authorization URL:
 
-```text
-https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id={your_client_id}&redirect_uri={your_callback_url}&state=foobar&scope=liteprofile%20emailaddress%20w_member_social
+```json
+{ "authorizationUrl": "https://www.linkedin.com/oauth/v2/authorization?..." }
 ```
-
-Authorization query parameters:
-
-- `response_type` — string, required. Always `code`.
-- `client_id` — string, required. The API key generated for the registered LinkedIn application.
-- `redirect_uri` — URL, required. Must exactly match a Redirect URL registered in the [LinkedIn application configuration](https://www.linkedin.com/developers/). The callback is handled by the proxy at `https://<edge-domain>/api/signin/callback`.
-- `state` — string, optional in LinkedIn's parameter definition. A unique, hard-to-guess value is used to prevent [CSRF](https://en.wikipedia.org/wiki/Cross-site_request_forgery). `foobar` is a sample only; generate a new value for each sign-in.
-- `scope` — string, required. URL-encoded, space-delimited member permissions explicitly enabled for the application: `liteprofile emailaddress w_member_social`. See [LinkedIn permissions](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authentication) and [application development best practices](https://learn.microsoft.com/en-us/linkedin/shared/api-guide/best-practices/application-development?context=linkedin/context).
 
 ### `GET /api/signin/callback`
 
@@ -120,7 +120,22 @@ https://<edge-domain>/api/signin/callback?state=foobar&code={authorization_code}
 
 **Response**
 
-On success, the backend sets the session cookie and redirects the browser to `/`. If sign-in fails, the backend redirects to `/auth`.
+On successful verification, the auth server creates the local user and session,
+sets an HttpOnly session cookie, and redirects the browser to `/`. Failures
+redirect to `/auth?error=<safe-code>`.
+
+### `POST /api/signin`
+
+**Request**
+
+```json
+{ "email": "ada@example.com", "password": "user-chosen-password" }
+```
+
+**Response**
+
+`204 No Content` and an HttpOnly session cookie. Unknown emails and incorrect
+passwords both return `401` with the same safe error message.
 
 ### `GET /api/me`
 
@@ -130,19 +145,20 @@ Session cookie; no request body.
 
 **Response**
 
-`200 OK` with the current user as JSON:
+`200 OK` with the display name and minimal role used by the existing
+admin-only UI. The user ID and credential data are never returned:
 
 ```json
 {
-  "id": "user-123",
-  "name": "Ada Lovelace",
-  "given_name": "Ada",
-  "email": "ada@example.com",
-  "role": "user"
+  "displayName": "Ada Lovelace",
+  "role": "USER"
 }
 ```
 
-When the cookie is missing or invalid, the response redirects to `/auth`.
+The auth server validates the cookie-backed Redis session and revalidates the
+account against the DB at most once per 24 hours. If account data changed, the
+session cache is refreshed without ending the active session. A missing or
+invalid cookie returns `401`.
 
 ### `POST /api/signout`
 
@@ -152,7 +168,8 @@ Session cookie and JSON body `{}`.
 
 **Response**
 
-Any `2xx` status after the session is invalidated and the cookie is cleared. The frontend ignores the response body.
+`204 No Content` after the session is invalidated and the cookie is cleared.
+Failures are surfaced rather than reported as a successful sign-out.
 
 ### `POST /api/analyze`
 
@@ -180,7 +197,7 @@ or graph data.
 
 The gateway receives the structured result from the internal AI service,
 persists the feedback and scores as an `Analysis` record owned by the
-authenticated `/api/me` user, then returns only the feedback text to the
+authenticated user from the private `/authorize` response, then returns only the feedback text to the
 browser. The internal score fields are listed in [[database-server]]. The
 frontend then requests `GET /api/analyses?limit=10` to refresh score history.
 
@@ -188,7 +205,7 @@ frontend then requests `GET /api/analyses?limit=10` to refresh score history.
 
 - `401` when the request has no valid session.
 - `403` when the request is forbidden. The frontend redirects to `/auth` on
-  any API `403`, including one returned by `GET /api/me`.
+  authorization failures.
 - `415` when the request is not a multipart upload.
 - `502` when a required downstream service fails or returns an invalid result.
 
@@ -240,16 +257,22 @@ shown. The overall older rating is calculated from those per-metric averages.
 
 ### Gateway → Auth server
 
-This gateway calls the Auth service to ask it for users permissions.
-the service returns 200 403 or 404.
-`/api/me` is the only needed route, it passes a session cookie in the header.
+The gateway uses the auth server's internal `/authorize` route to validate
+protected requests and obtain the authenticated ID and role. Public
+`GET /api/me` returns only display name and minimal role to the frontend.
+`POST /signin` verifies local email/password credentials; one-time LinkedIn
+registration stores a pending password hash, then the auth server creates the
+user through the private DB API and issues the Redis session. All internal
+auth requests require `AUTH_INTERNAL_TOKEN`.
 
 
 ### Gateway → DB server
 
 The gateway calls the DB server directly over its private HTTP interface for
-`User` and `Analysis` CRUD. The DB server runs as a separate process on its own port (`3003`, configured
-in the gateway); the service is not implemented yet.
+`Analysis` CRUD. The auth server also calls it for credential user lookup and
+one-time account creation. The DB server runs as a separate process on its own
+port (`3003`, configured in shared config); implementation is owned by another
+branch.
 It is not a browser-facing API and must not be exposed through Vite or the
 public edge proxy.
 
@@ -321,10 +344,10 @@ the DB server. The LinkedIn auth server does not own user-record CRUD.
 ## Notes
 
 - Protected browser API requests enter through the gateway. Before handling
-  them, the gateway validates the session with the auth server's `/api/me`
+  them, the gateway validates the session with the auth server's private `/authorize`
   endpoint. A failed check prevents the protected operation.
 - For DB mutations, the gateway passes the authenticated actor's `id` and
-  `role`; it must derive these from `/api/me`, not from browser-supplied data.
+  `role`; it must derive these from `/authorize`, not from browser-supplied data.
   The DB server independently validates authorization and field-level rules.
 - The DB server's storage engine and implementation are not yet set.
   See [[database-server]] for the proposed contract and outstanding schema

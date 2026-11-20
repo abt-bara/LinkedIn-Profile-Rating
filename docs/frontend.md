@@ -9,7 +9,7 @@ created: 2026-11-12
 
 Part of [[overview]]. The application in `frontend/` is a React 19,
 TypeScript, and Vite single-page app. React Router handles client routes;
-ESLint and TypeScript check the source. The UI provides LinkedIn sign-in,
+ESLint and TypeScript check the source. The UI provides one-time LinkedIn sign-up and local credential sign-in,
 session-protected profile review, PDF analysis, and an admin-only magic-link
 form.
 
@@ -28,34 +28,49 @@ or sends DB actor-identity headers directly.
 | Route | Access | Behavior |
 |---|---|---|
 | `/home` | Public | Displays the feature-led Profile Rater landing page using the existing session context; it makes no feature-data requests. |
-| `/auth` | Public | Checks session state; signed-in users are redirected to `/`. Anonymous users see the LinkedIn sign-in page. |
+| `/auth` | Public | Checks session state; signed-in users are redirected to `/`. Anonymous users can sign in with credentials or start one-time LinkedIn sign-up. |
 | `/` | Protected | Renders the profile dashboard after `GET /api/me` confirms a session. Anonymous users are redirected to `/auth`. |
 | Any other path | Public fallback | Displays a not-found page with a link to `/`. |
 
-The frontend does not implement a LinkedIn callback route. The login is a
-top-level browser navigation to the backend, not an XHR request:
+The frontend does not implement a LinkedIn callback route. Sign-up uses a
+same-origin request to prepare OAuth, followed by top-level navigation to
+LinkedIn. Credential sign-in is a same-origin JSON request:
 
 ```mermaid
 sequenceDiagram
   participant B as Browser / frontend
   participant G as Backend gateway
+  participant A as Auth server
   participant L as LinkedIn
-  B->>G: Navigate to GET /api/signin
-  G->>L: Authorization redirect (backend-owned)
-  L-->>G: Redirect to /api/signin/callback?code&state via public proxy
-  G->>L: Exchange code and validate identity (server-to-server)
-  Note over G: Validate state/nonce and ID token; find or create account
-  G-->>B: Set HttpOnly session cookie; redirect to /
+  opt New account
+    B->>G: POST /api/signup with chosen app password
+    G->>A: Store password hash bound to OAuth state
+    A-->>G: Pending sign-up stored in Redis
+    G-->>B: LinkedIn authorization URL + state cookie
+    B->>L: Navigate to authorization URL
+    L-->>B: Redirect with code and state
+    B->>G: GET /api/signin/callback
+    G->>L: Exchange code and validate identity (server-to-server)
+    L-->>G: Verified LinkedIn identity
+    G->>A: Complete sign-up; create user and session
+    G-->>B: Set HttpOnly session cookie; redirect to /
+  end
+  opt Returning user
+    B->>G: POST /api/signin with email + password
+    G->>A: Verify credentials and issue Redis session
+    G-->>B: Set HttpOnly session cookie
+  end
   B->>G: GET /api/me (cookie included)
-  G-->>B: Current user
+  G-->>B: Display name + minimal role
   B->>B: Render protected profile page
 ```
 
 The browser must never receive the LinkedIn client secret or OAuth tokens.
+The user sets an app password before starting the one-time LinkedIn sign-up.
 The backend is responsible for generating and checking OAuth `state` and
 `nonce`, exchanging the code, validating the ID token and issuer/audience/
-expiry, looking up or creating the account, loading roles, and setting the
-session cookie. After successful authentication, it must return the browser to
+expiry, requiring a verified email, creating the account, loading roles, and
+setting the session cookie. After successful sign-up, it must return the browser to
 `/`, where the provider loads the session with `GET /api/me`.
 
 The app keeps the normalized user in React context only. It does not store a
@@ -73,18 +88,19 @@ protected request.
   screen. `/auth` also waits for the initial check so a known signed-in user is
   not prompted to sign in again. `/home` remains available while the request
   runs and after an unauthenticated or failed check.
-- A `200` user response populates context. `/` renders the dashboard and `/auth`
+- A `200` response with `displayName` and minimal `role` populates context. `/` renders the dashboard and `/auth`
   redirects to `/`.
-- The gateway redirects a missing or invalid session from `/api/me` to `/auth`.
-  `/home` stays public; `/` must lead the user to `/auth`.
+- A missing or invalid session returns `401` from `/api/me`; the protected
+  route guard redirects to `/auth`. `/home` stays public.
 - Other failures (network, server, or invalid user response) are not treated as
   successful authentication. The route guard redirects to `/auth` with a
   recoverable message; the page allows a sign-in attempt or an explicit retry
   of the session check.
-- The frontend recognizes the safe login error codes `access_denied`,
-  `login_failed`, and `session_expired` on `/auth?error=...`. It maps codes to
+- The frontend recognizes safe sign-up error codes including `access_denied`,
+  `login_failed`, `account_exists`, `verified_email_required`, and
+  `signup_failed` on `/auth?error=...`. It maps codes to
   fixed user-facing text and does not display arbitrary query-string content.
-  The backend should redirect failed/cancelled login to `/auth` with one of
+  The backend should redirect failed/cancelled sign-up to `/auth` with one of
   these codes and must not put secrets, authorization codes, or internal error
   details in the URL.
 - Sign-out calls `POST /api/signout`. Context is cleared and the browser moves
@@ -94,13 +110,17 @@ protected request.
 
 ## Screens and behavior
 
-### Sign-in page
+### Sign-in and one-time sign-up page
 
-`src/pages/AuthPage.tsx` displays the LinkedIn-only sign-in action. Activating
-**Continue with LinkedIn** navigates the browser to `/api/signin`; the frontend
-does not construct the authorization URL or handle the callback. A returned
+`src/pages/AuthPage.tsx` presents **Sign in** and **Sign up with LinkedIn**
+actions. The sign-in panel expands inline and submits email/password to
+`POST /api/signin`. Sign-up first collects the app password and calls
+`POST /api/signup`; the response contains the LinkedIn authorization URL, and
+the frontend navigates there without handling the callback itself. The panel
+animates between the actions and honors reduced-motion preferences. Both
+wrong-password and unknown-email responses use the same safe error. A returned
 `/auth?error=...` code is shown using a fixed message mapping. If the current
-session check failed, the user can retry that check before starting a new login.
+session check failed, the user can retry that check before signing in.
 
 ### Public home page
 

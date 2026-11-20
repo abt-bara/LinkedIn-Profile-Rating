@@ -4,7 +4,6 @@ import cookieParser from "cookie-parser";
 import config from "../shared/config/config.json" with { type: "json" };
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
-import createAnalysisRouter from "./routers/analysis.js";
 import linkedInRouter from "./routers/linkedIn.js";
 import AuthRouter from "./routers/auth.js";
 import AnalysisRouter from "./routers/analysis.js";
@@ -14,12 +13,15 @@ const PORT = config.server_port.gateway;
 const ORIGIN = config.server_url.gateway;
 // Ensure BasePath never starts with a slash to avoid double-slash bugs
 const BasePath = config.uris.gateway.base.replace(/^\/+/, "");
-const SESSION_COOKIE = "user_id";
+const SESSION_COOKIE = "profile_rater_session";
 
 if (!Number.isInteger(PORT)) {
   throw new Error(
     `config.server_port.gateway must be a number, got: ${JSON.stringify(PORT)}`,
   );
+}
+if (!process.env.AUTH_INTERNAL_TOKEN) {
+  throw new Error("AUTH_INTERNAL_TOKEN must be configured.");
 }
 
 const app = express();
@@ -62,7 +64,7 @@ if (process.env.NODE_ENV !== "production") {
         schemas: {
           Error: {
             type: "object",
-            properties: { error: { type: "string", example: "Unauthorized" } },
+            properties: { message: { type: "string", example: "Unauthorized." } },
           },
         },
       },
@@ -77,8 +79,8 @@ if (process.env.NODE_ENV !== "production") {
 // ---- Routes ----
 app.get("/", (req, res) => res.redirect("/api-docs"));
 
-app.use(`/${BasePath}`, linkedInRouter); // /signin, /signin/callback, /check-token
-app.use(`/${BasePath}`, AuthRouter); // /me, /signout
+app.use(`/${BasePath}`, linkedInRouter); // /signup, /signin/callback, /check-token
+app.use(`/${BasePath}`, AuthRouter); // /signin, /me, /signout
 app.use(`/${BasePath}`, AnalysisRouter); // /analyze, /analyses?limit=:limit
 
 /**

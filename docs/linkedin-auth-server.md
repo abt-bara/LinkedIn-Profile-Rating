@@ -11,15 +11,15 @@ Part of [[architecture]]. Folder: `Backend/LinkedIn-auth-server`.
 
 ## Purpose
 
-Ensures **sign-in and sign-up through LinkedIn** work: it runs the login-state verification and validation that the full flow ([[LinkedIn-auth-flow]]) depends on. It talks to LinkedIn; it does not own user records or browser sessions. It returns a verified identity to the gateway. The gateway finds or creates the `User` through the [[database-server]], then coordinates session creation with the [[auth-server]]. The browser-facing route contract is centralized in [[overview]].
+Ensures the **one-time LinkedIn sign-up identity check** works: it runs the authorization-code flow and validation that the full flow ([[LinkedIn-auth-flow]]) depends on. It talks to LinkedIn; it does not own user records or browser sessions. It returns a verified identity to the gateway. The gateway passes that identity and the sign-up state to the [[auth-server]], which consumes the pending password hash, creates the user through the [[database-server]], and issues the Redis session. Later sign-ins use the local email/password contract and do not call LinkedIn.
 
 ## Responsibilities
 
 1. Build the LinkedIn authorize URL with a fresh `state` (and `nonce`).
-2. Handle `/api/signin/callback`, forwarded by the public proxy: validate `state`, reject on mismatch or LinkedIn error.
+2. Handle the LinkedIn callback forwarded by the gateway: validate `state`, reject on mismatch or LinkedIn error.
 3. Exchange the `code` for tokens (server to server, with the client secret).
 4. Verify the `id_token`.
-5. Return the verified identity (`sub`, name, email, picture) to the gateway. The gateway persists/finds the user through the DB server and requests a session from the auth server.
+5. Return the verified identity (`sub`, name, email, `email_verified`) to the gateway. The gateway asks the auth server to complete sign-up; the auth server handles DB persistence and session creation.
 
 ## LinkedIn endpoints
 

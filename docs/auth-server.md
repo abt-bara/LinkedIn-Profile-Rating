@@ -9,50 +9,68 @@ created: 2026-11-12
 
 Part of [[overview]].
 
-## Purpose
+## Purpose and ownership
 
-The auth server owns the application's session lifecycle and answers the
-gateway's session-validation request. It is not the CRUD service for profile
-or analysis records; those entities are owned by the separate [[database-server]].
+The auth server owns app-password verification and the Redis-backed session
+lifecycle. LinkedIn is used only for one-time account sign-up; later sign-ins
+use the verified LinkedIn email and the app password. User records remain
+owned by the separate [[database-server]], and the LinkedIn auth server
+validates the OAuth identity.
 
-## Responsibilities
+The browser calls the gateway only. Gateway-to-auth requests require the
+shared `AUTH_INTERNAL_TOKEN` bearer credential. The auth server fails closed
+if Redis is unavailable; it does not fall back to in-memory sessions.
 
-| Area | Responsibility |
+## Internal API
+
+These are private gateway-to-auth routes, not browser-facing endpoints:
+
+| Route | Purpose |
 |---|---|
-| Session issue | Establish a session after the LinkedIn identity has been validated and the user record is available |
-| Session validation | Validate the browser's session and return the authenticated user identity |
-| Session lifecycle | Expire, rotate, and revoke sessions, including sign-out |
-| Role context | Return the authenticated user's current `id` and `role` for gateway authorization checks |
+| `POST /signup` | Hash an app password and keep it in Redis under the OAuth `state` for 10 minutes |
+| `POST /signup/complete` | Consume the pending password hash, create a user from a verified LinkedIn identity through the DB service, and issue a session |
+| `DELETE /signup/{state}` | Remove pending sign-up state on cancellation/failure |
+| `POST /signin` | Find a user by normalized email, verify the password hash, and issue a session |
+| `GET /me` | Validate the browser session and return `{ "displayName": "...", "role": "USER" }` |
+| `POST /signout` | Revoke the session and clear its cookie |
+| `POST /authorize` | Validate the session and return only the internal user `id` and `role` for gateway authorization |
 
-The browser-facing `GET /api/me` contract is documented in [[overview]]. A
-successful response includes the user `id` and `role`; an absent or invalid
-session must not produce a successful response.
+Unknown users and incorrect passwords produce the same `401` response. The
+user ID, password hash, and email are not returned by `GET /me`.
 
-## Data ownership boundary
+## Redis sessions and cookies
 
-- The DB server owns the `User` and `Analysis` entities and their CRUD API.
-- The gateway validates each protected request with the auth server before
-  calling the DB server.
-- For a DB `PATCH`, the gateway passes the authenticated actor's `id` and
-  `role`. The DB server checks that context and the requested change itself.
-- The session store and its implementation are not specified here. Do not
-  assume PostgreSQL or Redis until the auth-service implementation selects
-  them.
+- Connect to Redis using `REDIS_URL`; the default is
+  `redis://127.0.0.1:6379`. Use Redis 6.2 or newer for atomic `GETDEL`.
+- Keep pending sign-up data for 10 minutes and sessions for 30 days.
+- Store sessions under a SHA-256 hash of a random opaque token. The raw token
+  exists only in the `HttpOnly`, `SameSite=Lax` cookie named
+  `profile_rater_session`; set `Secure` in production.
+- Never store or log a raw password or session token. Passwords are hashed
+  with Node's `scrypt` before being stored in Redis or sent to the DB service.
 
-## Session data
+## Periodic account revalidation
 
-At minimum, a session needs a user identifier, a non-reusable session token
-stored as a hash, an expiry time, and revocation state. The concrete schema,
-storage engine, and session cookie settings belong to the auth-server
-implementation; they are separate from the `User` and `Analysis` schema in
-[[database-server]].
+Every successful session check reads Redis first. At most once every 24 hours,
+the auth server loads the account again from the DB service using the internal
+auth lookup contract in [[database-server]]. The DB record's
+`credential_version` must increment whenever password/auth credentials change.
+The auth server refreshes the cached display name, role, and version when the
+record changes, preserving the active session. Deleted users or expired
+sessions are rejected.
 
-> [!note]
-> Never store or log a raw session token. The frontend must not receive the
-> token in JSON or store it in browser-accessible storage.
+## DB service configuration
 
-## Frontend API boundary
+Set `DB_SERVICE_TOKEN` in the auth server and DB service. The auth server uses
+the private DB routes documented in [[database-server]] to look up verified
+emails and user IDs and to create a user after LinkedIn sign-up. The DB server
+implementation is maintained separately; it must protect password hashes
+behind its service-authenticated auth lookup routes.
 
-The frontend calls the gateway only. Public request/response contracts are
-defined in [[overview]]; this page describes the auth server's internal
-responsibilities and does not add browser-facing routes.
+## Public API boundary
+
+The gateway exposes `POST /api/signup`, `POST /api/signin`,
+`GET /api/me`, and `POST /api/signout`. The browser-facing `/api/me` response
+contains only the display name and minimal role used by the existing admin UI.
+Protected gateway operations obtain ID and role through the private
+`/authorize` route; they do not depend on browser-supplied identity.

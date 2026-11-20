@@ -1,15 +1,13 @@
 import {
-  getMe,
   HttpError,
   httpClient,
   type ApiClient,
 } from './httpClient'
 
 export interface AuthUser {
-  id: string
+  displayName: string
   name: string
   firstName: string
-  email?: string
   role?: string
 }
 
@@ -18,38 +16,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseUser(value: unknown): AuthUser {
-  const record =
-    isRecord(value) && isRecord(value.user) ? value.user : value
-
-  if (!isRecord(record)) {
+  if (!isRecord(value) || typeof value.displayName !== 'string' || !value.displayName.trim()) {
     throw new Error('The authentication service returned an invalid user.')
   }
 
-  const name =
-    typeof record.name === 'string'
-      ? record.name
-      : typeof record.full_name === 'string'
-        ? record.full_name
-        : typeof record.displayName === 'string'
-          ? record.displayName
-          : ''
-
-  const givenName =
-    typeof record.given_name === 'string'
-      ? record.given_name
-      : typeof record.firstName === 'string'
-        ? record.firstName
-        : name.split(/\s+/)[0] || 'Friend'
-
-  const finalName = name || givenName || 'Friend'
-  const id = typeof record.id === 'string' ? record.id : finalName
-
+  const displayName = value.displayName.trim()
   return {
-    id,
-    name: finalName,
-    firstName: givenName,
-    email: typeof record.email === 'string' ? record.email : undefined,
-    role: typeof record.role === 'string' ? record.role : undefined,
+    displayName,
+    name: displayName,
+    firstName: displayName.split(/\s+/)[0] || 'Friend',
+    role: typeof value.role === 'string' ? value.role.toLowerCase() : undefined,
   }
 }
 
@@ -62,11 +38,31 @@ export class AuthService {
 
   async getCurrentUser(): Promise<AuthUser | null> {
     try {
-      return parseUser(await getMe())
+      return parseUser(await this.client.get('/me'))
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) return null
       throw error
     }
+  }
+
+  async signIn(email: string, password: string): Promise<void> {
+    await this.client.post('/signin', { email, password })
+  }
+
+  async beginSignup(password: string): Promise<string> {
+    const response = await this.client.post('/signup', { password })
+    if (!isRecord(response) || typeof response.authorizationUrl !== 'string') {
+      throw new Error('The sign-up service returned an invalid authorization URL.')
+    }
+
+    const authorizationUrl = new URL(response.authorizationUrl)
+    if (
+      authorizationUrl.protocol !== 'https:' ||
+      authorizationUrl.hostname !== 'www.linkedin.com'
+    ) {
+      throw new Error('The sign-up service returned an unsafe authorization URL.')
+    }
+    return authorizationUrl.toString()
   }
 
   async signOut(): Promise<void> {
