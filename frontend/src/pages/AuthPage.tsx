@@ -1,11 +1,17 @@
+import { useState, type FormEvent } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import heroImage from "../assets/hero.png";
+import { authService } from "../services/authService";
 
 const LOGIN_ERRORS: Record<string, string> = {
-  access_denied: "LinkedIn sign-in was cancelled. You can try again.",
-  login_failed: "We couldn't complete LinkedIn sign-in. Please try again.",
+  access_denied: "LinkedIn sign-up was cancelled. You can try again.",
+  login_failed: "We couldn't complete LinkedIn sign-up. Please try again.",
   session_expired: "Your sign-in session expired. Please start again.",
+  account_exists: "This LinkedIn account is already registered. Sign in instead.",
+  verified_email_required:
+    "Sign-up requires a verified email address on your LinkedIn account.",
+  signup_failed: "We couldn't complete sign-up. Please try again.",
 };
 
 function getSessionError(state: unknown): string | null {
@@ -23,6 +29,11 @@ function getSessionError(state: unknown): string | null {
 export function AuthPage() {
   const location = useLocation();
   const { user, loading, loadError, retrySession } = useAuth();
+  const [mode, setMode] = useState<"signin" | "signup" | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const stateError = getSessionError(location.state);
   const loginError = new URLSearchParams(location.search).get("error");
   const sessionError =
@@ -43,8 +54,41 @@ export function AuthPage() {
     return <Navigate to="/" replace />;
   }
 
-  function handleLinkedIn() {
-    window.location.assign("/api/signIn");
+  function showForm(nextMode: "signin" | "signup") {
+    setMode((current) => (current === nextMode ? null : nextMode));
+    setPassword("");
+    setActionError(null);
+  }
+
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      await authService.signIn(email, password);
+      window.location.assign("/");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Could not sign in. Try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const authorizationUrl = await authService.beginSignup(password);
+      window.location.assign(authorizationUrl);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Could not start sign-up. Try again.",
+      );
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -56,23 +100,109 @@ export function AuthPage() {
             Your next chapter starts here.
           </h1>
           <p className="auth-description">
-            Sign in or create your account securely with LinkedIn. If this is
-            your first time here, we’ll create your account for you.
+            Sign in with your email and password. New here? Create your account
+            once with LinkedIn.
           </p>
 
-          <button
-            className="button button-primary auth-oauth-button"
-            type="button"
-            onClick={handleLinkedIn}
-          >
-            <span className="linkedin-button-mark" aria-hidden="true">
-              in
-            </span>
-            Continue with LinkedIn
-            <span aria-hidden="true">→</span>
-          </button>
+          <div className="auth-flow-actions">
+            <button
+              className="button button-primary auth-oauth-button"
+              type="button"
+              aria-expanded={mode === "signin"}
+              aria-controls="auth-inline-form"
+              onClick={() => showForm("signin")}
+              disabled={submitting}
+            >
+              Sign in
+            </button>
 
-          {sessionError && (
+            <div
+              id="auth-inline-form"
+              className={`auth-form-disclosure${mode ? " is-open" : ""}`}
+              aria-hidden={!mode}
+            >
+              <div className="auth-form-disclosure-inner">
+                {mode === "signin" ? (
+                  <form className="auth-credential-form" onSubmit={(event) => void handleSignIn(event)}>
+                    <label htmlFor="signin-email">Email</label>
+                    <input
+                      id="signin-email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      required
+                      disabled={submitting}
+                    />
+                    <label htmlFor="signin-password">Password</label>
+                    <input
+                      id="signin-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required
+                      disabled={submitting}
+                    />
+                    <button
+                      className="button button-primary auth-submit-button"
+                      type="submit"
+                      disabled={submitting}
+                    >
+                      {submitting ? "Signing in…" : "Continue"}
+                    </button>
+                  </form>
+                ) : mode === "signup" ? (
+                  <form className="auth-credential-form" onSubmit={(event) => void handleSignUp(event)}>
+                    <p className="auth-form-hint">
+                      Choose a password first, then verify your account with LinkedIn.
+                    </p>
+                    <label htmlFor="signup-password">Create a password</label>
+                    <input
+                      id="signup-password"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      maxLength={128}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required
+                      disabled={submitting}
+                    />
+                    <button
+                      className="button button-primary auth-submit-button"
+                      type="submit"
+                      disabled={submitting}
+                    >
+                      {submitting ? "Starting sign-up…" : "Continue with LinkedIn"}
+                      <span aria-hidden="true">→</span>
+                    </button>
+                  </form>
+                ) : null}
+                {(actionError || sessionError) && (
+                  <p className="notice notice-error auth-notice" role="alert">
+                    {actionError ?? sessionError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <button
+              className="button auth-signup-button"
+              type="button"
+              aria-expanded={mode === "signup"}
+              aria-controls="auth-inline-form"
+              onClick={() => showForm("signup")}
+              disabled={submitting}
+            >
+              <span className="linkedin-button-mark" aria-hidden="true">
+                in
+              </span>
+              Sign up with LinkedIn
+            </button>
+          </div>
+
+          {!mode && sessionError && (
             <p className="notice notice-error auth-notice" role="alert">
               {sessionError}
             </p>
@@ -89,7 +219,8 @@ export function AuthPage() {
           )}
 
           <p className="auth-privacy">
-            LinkedIn is the only way to sign in or create an account.
+            LinkedIn is used once to verify your account. Your password is kept
+            private and never sent to LinkedIn.
           </p>
         </div>
         <span className="auth-copyright">© 2026 Profile Rater</span>

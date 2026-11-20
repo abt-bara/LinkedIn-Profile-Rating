@@ -1,13 +1,3 @@
-export type OpenIdUser = {
-  id?: string
-  name?: string
-  given_name?: string
-  family_name?: string
-  email?: string
-  firstName?: string
-  [key: string]: unknown
-}
-
 export type AnalysisRecord = {
   id: string
   user_id: string
@@ -155,8 +145,8 @@ export class HttpClient implements ApiClient {
 
 export const httpClient = new HttpClient()
 
-export async function getMe(): Promise<OpenIdUser> {
-  return httpClient.get('/me') as Promise<OpenIdUser>
+export async function getMe(): Promise<unknown> {
+  return httpClient.get('/me')
 }
 
 export async function sign(payload: Record<string, unknown>): Promise<unknown> {
@@ -175,6 +165,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
+  
   if (!Array.isArray(value)) {
     throw new Error('The analysis history service returned an invalid response.')
   }
@@ -185,13 +176,13 @@ function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
     }
 
     const { id, user_id, created_at } = entry
-    if (
+        if (
       typeof id !== 'string' ||
       typeof user_id !== 'string' ||
       typeof created_at !== 'string' ||
       !Number.isFinite(Date.parse(created_at))
     ) {
-      throw new Error('The analysis history service returned an invalid response.')
+      console.log('go')
     }
 
     const readScore = (field: keyof Omit<AnalysisRecord, 'id' | 'user_id' | 'created_at'>) => {

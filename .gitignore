@@ -1,3 +1,5 @@
 g.sh
 plan.md
 node_modules/
+./Backend/shared/.env
+.vscode/
