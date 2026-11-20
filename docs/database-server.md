@@ -28,16 +28,18 @@ flowchart LR
 - The gateway calls the DB server directly; user and analysis CRUD do not go
   through the auth server.
 - The gateway validates protected browser requests with the auth server's
-  `/api/me` endpoint before reading or mutating user data.
+  private `/authorize` endpoint before reading or mutating user data.
 - The DB server is internal-only. Do not expose its port through the edge
   server, Vite proxy, or browser.
 - The gateway's configured DB service URL is `http://localhost:3003`; see
   `Backend/gateway/config/config.json`.
 - Configure `DB_SERVICE_TOKEN` in the gateway environment and the matching
-  credential in the DB service before enabling internal calls.
-- Gateway-to-DB service authentication is required. Actor identity headers
-  below are authorization context and are not, by themselves, proof that the
-  caller is the gateway.
+  credential in the DB service before enabling internal calls. The auth server
+  also uses this credential for its private credential lookup and account
+  creation requests.
+-   Service authentication is required for gateway and auth-server DB requests.
+  Actor identity headers below are authorization context and are not, by
+  themselves, proof that the caller is the gateway.
 
 ## Entities
 
@@ -52,6 +54,9 @@ The source for the initial entity fields is [`Bd.drawio`](Bd.drawio).
 | `given_name` | Given name |
 | `family_name` | Family name |
 | `email` | Email address |
+| `email_verified` | Whether the email was verified by LinkedIn |
+| `password_hash` | App-password hash; never return it from general user CRUD |
+| `credential_version` | Monotonically increasing version; increment when authentication credentials change |
 | `role` | Authorization role, currently described as `USER` or `ADMIN` |
 
 ### `Analysis`
@@ -71,16 +76,17 @@ The source for the initial entity fields is [`Bd.drawio`](Bd.drawio).
 | `network` | Score from 0 to 100 |
 | `activity` | Score from 0 to 100 |
 
-The database diagram does not yet include `linkedin_sub`, although LinkedIn
-sign-in uses that stable identity claim to find or create an account. Add it as
-a unique user field before implementing account lookup. A server-generated
-`updated_at` is recommended for mutable records.
+The database diagram does not yet include `linkedin_sub`, although one-time
+LinkedIn sign-up uses that stable identity claim to associate the account.
+Add it as a unique user field. The verified email must also be unique because
+it is the later sign-in identifier. A server-generated `updated_at` is
+recommended for mutable records.
 
 ## Internal HTTP contract
 
 All paths below are **proposed**. They are private DB-server paths, not
 frontend routes. The gateway supplies these headers from the authenticated
-identity returned by `/api/me`:
+identity returned by the auth server's private `/authorize` route:
 
 ```http
 X-Actor-Id: <authenticated-user-id>
@@ -104,8 +110,9 @@ below are proposed defaults to confirm before implementation.
 
 **Request**
 
-Gateway-only account creation after LinkedIn identity verification. `role` is
-not accepted from the request; the DB server assigns `USER`.
+General user creation is restricted to trusted services. LinkedIn-based
+account registration uses the separate auth-only endpoint below so the DB
+server can also initialize passwords for existing LinkedIn accounts.
 
 ```json
 {
@@ -123,7 +130,83 @@ not accepted from the request; the DB server assigns `USER`.
 
 `201 Created` with the stored user, including its generated `id` and `role`.
 An existing `linkedin_sub` returns `409 Conflict`; it must not create a
-duplicate account.
+duplicate account. This route is not used for the LinkedIn password setup
+flow.
+
+#### `POST /internal/v1/auth/signup`
+
+**Request**
+
+Auth-server-only registration after LinkedIn identity verification. The
+password is already hashed with `scrypt`; the DB server must never receive
+plaintext credentials.
+
+```json
+{
+  "identity": {
+    "linkedin_sub": "linkedin-subject",
+    "email": "ada@example.com",
+    "email_verified": true,
+    "name": "Ada Lovelace",
+    "given_name": "Ada",
+    "family_name": "Lovelace"
+  },
+  "password_hash": "scrypt$<salt-hex>$<derived-key-hex>"
+}
+```
+
+Create a new `USER` record if the LinkedIn subject is new. If that subject
+already has a local user record but no app password, attach the verified email
+and password hash to that record and increment `credential_version`. This
+allows existing LinkedIn-only users to complete the one-time setup. If that
+account already has a password, or the email is already owned by a different
+user, return `409 Conflict`.
+
+**Response**
+
+`201 Created` for a new account or `200 OK` when initializing an existing
+LinkedIn-only account. Return the auth record required by the auth server:
+`id`, `email`, `password_hash`, `credential_version`, `display_name`, and
+`role`.
+
+#### `GET /internal/v1/auth/users/by-email/{email}`
+
+**Request**
+
+Auth-server-only credential lookup by normalized, verified email. Requires
+`DB_SERVICE_TOKEN`; no actor headers are accepted in place of service
+authentication.
+
+**Response**
+
+`200 OK` with the private auth record:
+
+```json
+{
+  "id": "user-123",
+  "email": "ada@example.com",
+  "password_hash": "scrypt$<salt-hex>$<derived-key-hex>",
+  "credential_version": 1,
+  "display_name": "Ada Lovelace",
+  "role": "USER"
+}
+```
+
+Return `404 Not Found` for an unknown email. This endpoint must not be exposed
+to the browser or included in general user-list responses.
+
+#### `GET /internal/v1/auth/users/{userId}`
+
+**Request**
+
+Auth-server-only lookup for 24-hour session revalidation. Requires
+`DB_SERVICE_TOKEN`.
+
+**Response**
+
+`200 OK` with the same private auth record as the email lookup, or `404 Not
+Found` when the account no longer exists. Increment `credential_version`
+whenever the password or another authentication credential changes.
 
 #### `GET /internal/v1/users`
 
@@ -199,9 +282,10 @@ be settled before enabling this route.
 ### Analysis CRUD
 
 All analysis reads and mutations are scoped to the authenticated user. The
-gateway obtains the actor headers from `/api/me`; the DB server derives the
-record's `user_id` from that identity for creation and does not permit an
-ordinary user to transfer an analysis to another user.
+gateway obtains the actor headers from the auth server's private `/authorize`
+response; the DB server derives the record's `user_id` from that identity for
+creation and does not permit an ordinary user to transfer an analysis to
+another user.
 
 #### `POST /internal/v1/analyses`
 
