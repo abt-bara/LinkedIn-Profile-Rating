@@ -1,287 +1,327 @@
-"""Private, dependency-free HTTP persistence API for LinkedIn Profile Rater."""
-from __future__ import annotations
+#!/usr/bin/env python3
+"""CRUD HTTP server for the `User` and `Analysis` tables (Bd.drawio).
 
+Standard library only: http.server + sqlite3 + json.
+Settings are read from ../shared/config/config.json (relative to this file).
+Run:  python3 server.py
+"""
 import json
-import math
-import os
 import re
-import uuid
+import sqlite3
+import sys
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, urlparse
 
-from auth import Actor, AuthError, load_actor, require_admin, verify_service_token
-from db import migrate, row_dict, transaction, utc_now
-
-USER_FIELDS = {"name", "given_name", "family_name", "email"}
-SCORE_FIELDS = {"completeness", "content_quality", "keyword_and_role_relevance", "career_trajectory", "skills_depth", "social_proof", "network", "activity"}
-ANALYSIS_FIELDS = SCORE_FIELDS | {"analysis_result"}
-ID_RE = re.compile(r"^[^/]+$")
-MAX_BODY = 1024 * 1024
+# ../shared/config/config.json, resolved relative to this file (not the launch directory)
+CONFIG_PATH = (Path(__file__).resolve().parent / ".." / "shared" / "config" / "config.json").resolve()
 
 
-def load_dotenv() -> None:
-    """Load a local .env without overriding process environment values."""
-    path = os.path.join(os.path.dirname(__file__), ".env")
-    if not os.path.isfile(path):
-        return
-    with open(path, encoding="utf-8") as env_file:
-        for line in env_file:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key, value = key.strip(), value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+SERVICE = "db_server"  # this server's name inside the shared config
+BIND_HOST = "127.0.0.1"
+DB_PATH = Path(__file__).resolve().parent / "app.db"
 
 
-def validate_text(value, field, required=False, max_length=10000):
-    if value is None and not required:
-        return None
-    if not isinstance(value, str) or (required and not value.strip()) or len(value) > max_length:
-        raise ValueError(f"Invalid {field}")
-    return value
+@dataclass(frozen=True)
+class Config:
+    port: int
+    host: str = BIND_HOST
+    db: str = str(DB_PATH)
+    max_body: int = 1_000_000  # bytes
+
+    @classmethod
+    def load(cls, path=CONFIG_PATH, service=SERVICE):
+        """Read the shared config and keep only what this service needs.
+
+        The file belongs to every service, so keys we don't use are ignored;
+        the keys we DO need must exist and have the right type.
+        """
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            sys.exit(f"cannot read config '{path}': {e}")
+        try:
+            port = data["server_port"][service]
+        except (KeyError, TypeError):
+            sys.exit(f"config '{path}' has no server_port.{service}")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            sys.exit(f"config server_port.{service} must be an integer between 1 and 65535")
+        return cls(port=port)
 
 
-def validate_score(value, field):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
-        raise ValueError(f"Invalid {field}")
-    return value
+CFG = Config.load()  # loaded once at import time; frozen, so safe to share across threads
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS user (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    given_name  TEXT NOT NULL,
+    family_name TEXT NOT NULL,
+    email       TEXT NOT NULL UNIQUE,
+    role        TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS analysis (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    analysis_result             TEXT,
+    completeness                REAL,
+    content_quality             REAL,
+    keyword_and_role_relevance  REAL,
+    career_trajectory           REAL,
+    skills_depth                REAL,
+    social_proof                REAL,
+    network                     REAL,
+    activity                    REAL,
+    created_at                  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_user_id ON analysis(user_id);
+"""
+
+# field -> (type, required_on_create). Whitelist: only these names ever reach SQL.
+RESOURCES = {
+    "users": {
+        "table": "user",
+        "fields": {
+            "name": ("text", True),
+            "given_name": ("text", True),
+            "family_name": ("text", True),
+            "email": ("text", True),
+            "role": ("text", True),
+        },
+        "filters": {},
+    },
+    "analyses": {
+        "table": "analysis",
+        "fields": {
+            "user_id": ("int", True),
+            "analysis_result": ("text", False),
+            "completeness": ("real", False),
+            "content_quality": ("real", False),
+            "keyword_and_role_relevance": ("real", False),
+            "career_trajectory": ("real", False),
+            "skills_depth": ("real", False),
+            "social_proof": ("real", False),
+            "network": ("real", False),
+            "activity": ("real", False),
+        },
+        "filters": {"user_id": "int"},
+        "server_set": {"created_at": lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")},
+    },
+}
+
+ROUTE = re.compile(r"^/(?P<name>users|analyses)(?:/(?P<id>\d+))?/?$")
+
+
+class HTTPError(Exception):
+    def __init__(self, status, message):
+        self.status, self.message = status, message
+
+
+# ---------- validation ----------
+
+def _check_type(field, kind, value):
+    if kind == "text" and isinstance(value, str):
+        return value
+    if kind == "int" and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if kind == "real" and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    raise HTTPError(422, f"field '{field}' must be of type {kind}")
+
+
+def validate(res, body, *, partial):
+    if not isinstance(body, dict):
+        raise HTTPError(400, "body must be a JSON object")
+    fields = res["fields"]
+    unknown = set(body) - set(fields)
+    if unknown:
+        raise HTTPError(422, f"unknown field(s): {', '.join(sorted(unknown))}")
+    clean = {}
+    for name, (kind, required) in fields.items():
+        if name not in body:
+            if required and not partial:
+                raise HTTPError(422, f"field '{name}' is required")
+            continue
+        value = body[name]
+        if value is None:
+            if required:
+                raise HTTPError(422, f"field '{name}' cannot be null")
+            clean[name] = None
+            continue
+        clean[name] = _check_type(name, kind, value)
+        if kind == "text" and required and not clean[name].strip():
+            raise HTTPError(422, f"field '{name}' cannot be empty")
+    return clean
+
+
+# ---------- database ----------
+
+@contextmanager
+def db(path):
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")  # off by default in SQLite, per connection
+    try:
+        with conn:  # commit on success, rollback on error
+            yield conn
+    finally:
+        conn.close()
+
+
+def get_row(conn, res, rid):
+    row = conn.execute(f"SELECT * FROM {res['table']} WHERE id = ?", (rid,)).fetchone()
+    if row is None:
+        raise HTTPError(404, "not found")
+    return dict(row)
+
+
+def list_rows(conn, res, query):
+    where, params = [], []
+    for name, kind in res["filters"].items():
+        if name in query:
+            try:
+                params.append(int(query[name][0]))
+            except ValueError:
+                raise HTTPError(400, f"filter '{name}' must be an integer")
+            where.append(f"{name} = ?")
+    try:
+        limit = min(int(query.get("limit", ["100"])[0]), 1000)
+        offset = int(query.get("offset", ["0"])[0])
+    except ValueError:
+        raise HTTPError(400, "limit/offset must be integers")
+    if limit < 1 or offset < 0:
+        raise HTTPError(400, "limit must be >= 1 and offset must be >= 0")
+    sql = f"SELECT * FROM {res['table']}"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id LIMIT ? OFFSET ?"
+    return [dict(r) for r in conn.execute(sql, (*params, limit, offset))]
+
+
+def create_row(conn, res, data):
+    for name, fn in res.get("server_set", {}).items():
+        data[name] = fn()
+    cols = list(data)
+    cur = conn.execute(
+        f"INSERT INTO {res['table']} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+        [data[c] for c in cols],
+    )
+    return get_row(conn, res, cur.lastrowid)
+
+
+def update_row(conn, res, rid, data):
+    if not data:
+        raise HTTPError(400, "no fields to update")
+    cols = list(data)
+    cur = conn.execute(
+        f"UPDATE {res['table']} SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+        [data[c] for c in cols] + [rid],
+    )
+    if cur.rowcount == 0:
+        raise HTTPError(404, "not found")
+    return get_row(conn, res, rid)
+
+
+def delete_row(conn, res, rid):
+    cur = conn.execute(f"DELETE FROM {res['table']} WHERE id = ?", (rid,))
+    if cur.rowcount == 0:
+        raise HTTPError(404, "not found")
+
+
+# ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ProfileRaterDB/1.0"
-    sys_version = ""
+    server_version = "BdServer/1.0"
 
-    def log_message(self, _format, *_args):
-        # Default access logs include paths/identifiers. Do not log requests or credentials.
-        return
-
-    @property
-    def database(self):
-        return self.server.database_path
-
-    def send_json(self, status, payload=None):
-        body = b"" if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    def _send(self, status, payload=None, headers=None):
+        body = b"" if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         if payload is not None:
             self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         if body:
             self.wfile.write(body)
 
-    def read_json(self):
-        length = self.headers.get("Content-Length")
-        if length is None:
-            raise ValueError("Request body is required")
+    def _read_json(self):
         try:
-            size = int(length)
+            length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
-            raise ValueError("Invalid request body")
-        if size < 0 or size > MAX_BODY:
-            raise ValueError("Request body is too large")
-        raw = self.rfile.read(size)
+            raise HTTPError(400, "invalid Content-Length")
+        if length <= 0:
+            raise HTTPError(400, "request body required")
+        if length > CFG.max_body:
+            raise HTTPError(413, "body too large")
         try:
-            value = json.loads(raw.decode("utf-8"))
+            return json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ValueError("Invalid JSON body")
-        if not isinstance(value, dict):
-            raise ValueError("JSON body must be an object")
-        return value
+            raise HTTPError(400, "invalid JSON")
 
-    def service_auth(self):
-        verify_service_token(self.headers.get("Authorization"), os.environ.get("DB_SERVICE_TOKEN", ""))
-
-    def actor(self, conn):
-        return load_actor(conn, self.headers.get("X-Actor-Id"), self.headers.get("X-Actor-Role"))
-
-    def dispatch(self):
+    def handle_request(self):
         try:
-            self.service_auth()
-            parsed = urlsplit(self.path)
-            parts = [unquote(p) for p in parsed.path.split("/") if p]
-            if len(parts) < 2 or parts[:2] != ["internal", "v1"]:
-                self.send_json(404, {"error": "Not found"})
-                return
-            with transaction(self.database) as conn:
-                self.route(conn, parts[2:], parse_qs(parsed.query, keep_blank_values=True))
-        except AuthError as exc:
-            self.send_json(exc.status, {"error": exc.message})
-        except ValueError as exc:
-            self.send_json(400, {"error": str(exc)})
-        except Exception as exc:
-            # Avoid leaking database errors, stack traces, paths, or internals.
-            if exc.__class__.__name__ == "IntegrityError":
-                self.send_json(409, {"error": "Resource conflicts with an existing record"})
+            url = urlparse(self.path)
+            m = ROUTE.match(url.path)
+            if not m:
+                raise HTTPError(404, "not found")
+            res = RESOURCES[m["name"]]
+            rid = int(m["id"]) if m["id"] else None
+            method = self.command
+
+            with db(CFG.db) as conn:
+                if rid is None:
+                    if method == "GET":
+                        return self._send(200, list_rows(conn, res, parse_qs(url.query)))
+                    if method == "POST":
+                        row = create_row(conn, res, validate(res, self._read_json(), partial=False))
+                        return self._send(201, row, {"Location": f"/{m['name']}/{row['id']}"})
+                    raise HTTPError(405, "method not allowed")
+
+                if method == "GET":
+                    return self._send(200, get_row(conn, res, rid))
+                if method == "PUT":
+                    data = validate(res, self._read_json(), partial=False)
+                    return self._send(200, update_row(conn, res, rid, data))
+                if method == "PATCH":
+                    data = validate(res, self._read_json(), partial=True)
+                    return self._send(200, update_row(conn, res, rid, data))
+                if method == "DELETE":
+                    delete_row(conn, res, rid)
+                    return self._send(204)
+                raise HTTPError(405, "method not allowed")
+
+        except HTTPError as e:
+            self._send(e.status, {"error": e.message})
+        except sqlite3.IntegrityError as e:
+            msg = str(e)
+            if "FOREIGN KEY" in msg:
+                self._send(422, {"error": "user_id does not reference an existing user"})
+            elif "UNIQUE" in msg:
+                self._send(409, {"error": "a record with this unique value already exists"})
             else:
-                self.send_json(500, {"error": "Internal server error"})
+                self._send(409, {"error": msg})
+        except Exception as e:  # last resort: never leak a stack trace to the client
+            print(f"internal error: {e!r}", file=sys.stderr)
+            self._send(500, {"error": "internal server error"})
 
-    def route(self, conn, parts, query):
-        method = self.command
-        if parts == ["users"]:
-            if method == "POST":
-                self.create_user(conn)
-                return
-            actor = self.actor(conn)
-            if method == "GET":
-                require_admin(actor)
-                rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC, id").fetchall()
-                self.send_json(200, {"users": [dict(row) for row in rows]})
-                return
-        if len(parts) == 3 and parts[0] == "users" and parts[1] == "by-linkedin-sub" and method == "GET":
-            row = conn.execute("SELECT * FROM users WHERE linkedin_sub = ?", (parts[2],)).fetchone()
-            self.send_json(200, {"user": dict(row)}) if row else self.send_json(404, {"error": "Not found"})
-            return
-        if len(parts) == 2 and parts[0] == "users":
-            user_id = parts[1]
-            actor = self.actor(conn)
-            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-            if row is None:
-                self.send_json(404, {"error": "Not found"})
-                return
-            if method == "GET":
-                if actor.role != "ADMIN" and actor.id != user_id:
-                    raise AuthError(403, "Access denied")
-                self.send_json(200, {"user": dict(row)})
-                return
-            if method == "PATCH":
-                self.patch_user(conn, actor, user_id)
-                return
-            if method == "DELETE":
-                require_admin(actor)
-                conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-                self.send_json(204)
-                return
-        if parts == ["analyses"]:
-            actor = self.actor(conn)
-            if method == "POST":
-                self.create_analysis(conn, actor)
-                return
-            if method == "GET":
-                self.list_analyses(conn, actor, query)
-                return
-        if len(parts) == 2 and parts[0] == "analyses":
-            actor = self.actor(conn)
-            analysis_id = parts[1]
-            row = conn.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-            if row is None:
-                self.send_json(404, {"error": "Not found"})
-                return
-            if actor.role != "ADMIN" and row["user_id"] != actor.id:
-                raise AuthError(403, "Access denied")
-            if method == "GET":
-                self.send_json(200, {"analysis": dict(row)})
-                return
-            if method == "PATCH":
-                self.patch_analysis(conn, analysis_id)
-                return
-            if method == "DELETE":
-                conn.execute("DELETE FROM analyses WHERE id = ?", (analysis_id,))
-                self.send_json(204)
-                return
-        self.send_json(404, {"error": "Not found"})
-
-    def create_user(self, conn):
-        payload = self.read_json()
-        data = payload.get("user")
-        if set(payload) != {"user"} or not isinstance(data, dict) or set(data) - {"linkedin_sub", *USER_FIELDS}:
-            raise ValueError("Invalid user payload")
-        subject = validate_text(data.get("linkedin_sub"), "linkedin_sub", True, 512)
-        values = {field: validate_text(data.get(field), field, False, 500) for field in USER_FIELDS}
-        user_id, now = str(uuid.uuid4()), utc_now()
-        conn.execute("INSERT INTO users(id, linkedin_sub, name, given_name, family_name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'USER', ?, ?)", (user_id, subject, values["name"], values["given_name"], values["family_name"], values["email"], now, now))
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        self.send_json(201, {"user": dict(row)})
-
-    def patch_user(self, conn, actor, user_id):
-        payload = self.read_json()
-        if set(payload) - USER_FIELDS - {"role"} or not payload:
-            raise ValueError("Invalid user fields")
-        if actor.role != "ADMIN" and actor.id != user_id:
-            raise AuthError(403, "Access denied")
-        if "role" in payload:
-            if actor.role != "ADMIN" or actor.id == user_id or payload["role"] not in ("USER", "ADMIN"):
-                raise AuthError(403, "Role change is not permitted")
-        values = {}
-        for field in USER_FIELDS & payload.keys():
-            values[field] = validate_text(payload[field], field, False, 500)
-        values.update({"role": payload["role"]} if "role" in payload else {})
-        values["updated_at"] = utc_now()
-        assignments = ", ".join(f"{field} = ?" for field in values)
-        conn.execute(f"UPDATE users SET {assignments} WHERE id = ?", (*values.values(), user_id))
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        self.send_json(200, {"user": dict(row)})
-
-    def create_analysis(self, conn, actor):
-        payload = self.read_json()
-        data = payload.get("analysis")
-        if set(payload) != {"analysis"} or not isinstance(data, dict) or set(data) != ANALYSIS_FIELDS:
-            raise ValueError("Invalid analysis payload")
-        result = validate_text(data["analysis_result"], "analysis_result", True, 100000)
-        scores = {field: validate_score(data[field], field) for field in SCORE_FIELDS}
-        analysis_id, now = str(uuid.uuid4()), utc_now()
-        fields = sorted(SCORE_FIELDS)
-        conn.execute("INSERT INTO analyses(id, user_id, analysis_result, " + ", ".join(fields) + ", created_at, updated_at) VALUES (?, ?, ?, " + ", ".join("?" for _ in fields) + ", ?, ?)", (analysis_id, actor.id, result, *(scores[field] for field in fields), now, now))
-        row = conn.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-        self.send_json(201, {"analysis": dict(row)})
-
-    def list_analyses(self, conn, actor, query):
-        try:
-            limit = int(query.get("limit", ["10"])[0])
-        except (TypeError, ValueError):
-            raise ValueError("Invalid limit")
-        if not 1 <= limit <= 10:
-            raise ValueError("Invalid limit")
-        target = query.get("user_id", [None])[0]
-        if actor.role != "ADMIN" and target not in (None, actor.id):
-            raise AuthError(403, "Access denied")
-        if actor.role == "ADMIN" and target:
-            rows = conn.execute("SELECT * FROM analyses WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?", (target, limit)).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM analyses WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?", (actor.id, limit)).fetchall()
-        self.send_json(200, {"analyses": [dict(row) for row in rows]})
-
-    def patch_analysis(self, conn, analysis_id):
-        payload = self.read_json()
-        data = payload.get("analysis")
-        if set(payload) != {"analysis"} or not isinstance(data, dict) or not data or set(data) - ANALYSIS_FIELDS:
-            raise ValueError("Invalid analysis fields")
-        values = {}
-        for field, value in data.items():
-            values[field] = validate_text(value, field, True, 100000) if field == "analysis_result" else validate_score(value, field)
-        values["updated_at"] = utc_now()
-        assignments = ", ".join(f"{field} = ?" for field in values)
-        conn.execute(f"UPDATE analyses SET {assignments} WHERE id = ?", (*values.values(), analysis_id))
-        row = conn.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-        self.send_json(200, {"analysis": dict(row)})
-
-    def do_GET(self): self.dispatch()
-    def do_POST(self): self.dispatch()
-    def do_PATCH(self): self.dispatch()
-    def do_DELETE(self): self.dispatch()
-    def do_PUT(self): self.dispatch()
-    def do_OPTIONS(self): self.dispatch()
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = handle_request
 
 
 def main():
-    load_dotenv()
-    token = os.environ.get("DB_SERVICE_TOKEN", "")
-    if not token:
-        raise SystemExit("DB_SERVICE_TOKEN must be set; see .env.example")
-    host = os.environ.get("DB_HOST", "127.0.0.1")
-    port = int(os.environ.get("DB_PORT", "3003"))
-    database = os.environ.get("DB_PATH", "./data/profile-rater.sqlite3")
-    migrate(database)
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    httpd.daemon_threads = True
-    httpd.database_path = database
-    print(f"DB service listening on {host}:{port}")
+    with sqlite3.connect(CFG.db) as conn:
+        conn.executescript(SCHEMA)
+
+    httpd = ThreadingHTTPServer((CFG.host, CFG.port), Handler)
+    print(f"Serving on http://{CFG.host}:{CFG.port}  (db: {CFG.db})")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        pass
+        print("\n Database session closed")
     finally:
         httpd.server_close()
 

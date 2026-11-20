@@ -1,323 +1,249 @@
+# Bd Server
+
+A minimal CRUD backend for two tables (`User`, `Analysis`) taken from `Bd.drawio`.
+Python standard library only: [`http.server`](https://docs.python.org/3/library/http.server.html), [`sqlite3`](https://docs.python.org/3/library/sqlite3.html), [`json`](https://docs.python.org/3/library/json.html). No dependencies, one file (`server.py`).
+
+## Run
+
+```bash
+python3 server.py
+```
+
+The port comes from the shared config (see Configuration below). The schema is created automatically at startup (`CREATE TABLE IF NOT EXISTS`).
+
+## Configuration
+
+The server reads the shared file `../shared/config/config.json` (resolved relative to the folder containing `server.py`, so the launch directory doesn't matter). That file belongs to every service in the project, so this server only picks what it needs and ignores the rest:
+
+```json
+{
+  "server_port": {
+    "db_server": 3003
+  }
+}
+```
+
+| Setting | Source | Value |
+|---|---|---|
+| `port` | `server_port.db_server` in the shared file | `3003` in your file |
+| `host` | constant `BIND_HOST` in `server.py` | `127.0.0.1` |
+| `db` | constant `DB_PATH` in `server.py` | `app.db` next to `server.py` |
+| `max_body` | default in `Config` | `1000000` bytes (larger → `413`) |
+
+The service name is the constant `SERVICE = "db_server"`. Change it if this server should use another entry of `server_port`.
+
+The file is loaded once at startup into a frozen `Config` object (`CFG`) that the code reads as `CFG.port`, `CFG.db`, and so on. The server refuses to start (exit code 1, message on stderr) if the file is missing, is not valid JSON, has no `server_port.db_server`, or that value is not an integer from 1 to 65535.
+
 ---
-title: Database Server
-aliases: [DB Server, Persistence API]
-tags: [profile-rater, backend, database, api]
+
+## Data model
+
+```
+User (1) ────────< (n) Analysis
+```
+
+### `user`
+
+| Column | Type | Constraints |
+|---|---|---|
+| `id` | integer | primary key, auto-increment |
+| `name` | text | required, non-empty |
+| `given_name` | text | required, non-empty |
+| `family_name` | text | required, non-empty |
+| `email` | text | required, non-empty, **unique** |
+| `role` | text | required, non-empty |
+
+### `analysis`
+
+| Column | Type | Constraints |
+|---|---|---|
+| `id` | integer | primary key, auto-increment |
+| `user_id` | integer | required, foreign key → `user.id`, `ON DELETE CASCADE` |
+| `analysis_result` | text | optional |
+| `completeness` | number | optional |
+| `content_quality` | number | optional |
+| `keyword_and_role_relevance` | number | optional |
+| `career_trajectory` | number | optional |
+| `skills_depth` | number | optional |
+| `social_proof` | number | optional |
+| `network` | number | optional |
+| `activity` | number | optional |
+| `created_at` | text (ISO 8601, UTC) | **set by the server**, read-only |
+
+Notes:
+- Deleting a user **deletes all of their analyses** (cascade).
+- Score columns accept any number; no range is enforced.
+- SQLite does not enforce foreign keys unless asked per connection; `db()` does this with [`PRAGMA foreign_keys = ON`](https://www.sqlite.org/foreignkeys.html).
+
 ---
 
-# Database Server
+## Code structure (main functions)
 
-Part of [[overview]]. This document defines the planned internal HTTP API for
-persisting `User` and `Analysis` records.
+The server is driven by one dictionary, `RESOURCES`, so both tables share the same code path.
 
-> [!warning] Planned service
-> The DB server is not implemented in this repository. It will run as a
-> separate service with its own port (`3003` in the gateway configuration).
-> The storage engine is undecided. The routes below are the proposed contract,
-> not live endpoints.
-
-## Boundary and request flow
-
-```mermaid
-flowchart LR
-  B[Browser] -->|Public /api requests| G[Gateway]
-  G -->|Validate session| A[Auth server]
-  G -->|Private HTTP CRUD<br/>port 3003| DB[DB server]
-  G --> AI[AI server]
-```
-
-- The gateway calls the DB server directly; user and analysis CRUD do not go
-  through the auth server.
-- The gateway validates protected browser requests with the auth server's
-  `/api/me` endpoint before reading or mutating user data.
-- The DB server is internal-only. Do not expose its port through the edge
-  server, Vite proxy, or browser.
-- The gateway's configured DB service URL is `http://localhost:3003`; see
-  `Backend/gateway/config/config.json`.
-- Configure `DB_SERVICE_TOKEN` in the gateway environment and the matching
-  credential in the DB service before enabling internal calls.
-- Gateway-to-DB service authentication is required. Actor identity headers
-  below are authorization context and are not, by themselves, proof that the
-  caller is the gateway.
-
-## Entities
-
-The source for the initial entity fields is [`Bd.drawio`](Bd.drawio).
-
-### `User`
-
-| Field | Meaning |
+| Function / object | Role |
 |---|---|
-| `id` | Primary key; concrete type/format TBD |
-| `name` | Display name |
-| `given_name` | Given name |
-| `family_name` | Family name |
-| `email` | Email address |
-| `role` | Authorization role, currently described as `USER` or `ADMIN` |
+| `Config` | Frozen dataclass holding `port`, `host`, `db`, `max_body`. `Config.load()` reads the shared config file, takes `server_port.db_server`, validates it, and ignores every other key. |
+| `CFG` | The single `Config` instance, created once at import time and shared by all request threads (safe because it is immutable). |
+| `SCHEMA` | SQL that creates both tables and the index on `analysis.user_id`. |
+| `RESOURCES` | Per-resource config: table name, whitelist of client-writable fields with `(type, required)`, allowed list filters, and server-set fields (`created_at`). Only names from this whitelist are ever interpolated into SQL; all values are bound as `?` parameters. |
+| `ROUTE` | Regex `^/(users\|analyses)(/<digits>)?/?$` mapping a path to a resource and an optional id. |
+| `HTTPError(status, message)` | Raised anywhere to produce a JSON error response with that status. |
+| `validate(res, body, *, partial)` | Checks the body is a JSON object, rejects unknown fields (422), enforces types, enforces required fields (unless `partial=True`), rejects `null`/empty for required text fields. Returns the cleaned dict. |
+| `_check_type(field, kind, value)` | Type check for `text`, `int`, `real`. Booleans are rejected as numbers. Ints are converted to float for `real`. |
+| `db(path)` | Context manager: opens a connection per request, enables foreign keys, commits on success, rolls back on error, always closes. This keeps the threaded server safe. |
+| `list_rows(conn, res, query)` | `SELECT` with optional filters, `limit`, `offset`, ordered by `id`. |
+| `get_row(conn, res, rid)` | Fetch one row or raise 404. |
+| `create_row(conn, res, data)` | Inserts, adds server-set fields, returns the created row. |
+| `update_row(conn, res, rid, data)` | Updates only the provided fields, raises 404 if the id doesn't exist, returns the updated row. |
+| `delete_row(conn, res, rid)` | Deletes or raises 404. |
+| `Handler.handle_request()` | The single entry point for GET/POST/PUT/PATCH/DELETE: routes, validates, calls the CRUD function, and maps exceptions to status codes (`sqlite3.IntegrityError` → 409/422, anything unexpected → 500 without leaking details). |
+| `Handler._read_json()` | Reads the body using `Content-Length` (max `CFG.max_body` bytes), parses JSON. |
+| `Handler._send()` | Writes a JSON response with status, `Content-Length`, and optional headers. |
+| `main()` | Creates the schema in `CFG.db` and starts `ThreadingHTTPServer` on `CFG.host:CFG.port`. |
 
-### `Analysis`
+Request flow:
 
-| Field | Meaning |
+```
+request → ROUTE match → RESOURCES[name] → db() connection
+        → (read JSON → validate) → CRUD function → JSON response
+```
+
+---
+
+## API contract
+
+### Conventions
+
+- All request and response bodies are JSON (`UTF-8`). Send `Content-Type: application/json` on `POST`/`PUT`/`PATCH`.
+- Trailing slashes are accepted (`/users/` = `/users`).
+- A non-numeric id (`/users/abc`) does not match any route → `404`.
+- `id` and `created_at` can never be sent by the client. Sending them returns `422 unknown field(s)`.
+- Error responses always have the shape `{"error": "<message>"}`.
+
+### Users
+
+| Method | Path | Body | Success | Notes |
+|---|---|---|---|---|
+| `GET` | `/users` | none | `200` array of users | Supports `limit`, `offset`. |
+| `POST` | `/users` | all 5 fields | `201` created user + `Location: /users/{id}` | |
+| `GET` | `/users/{id}` | none | `200` user | |
+| `PUT` | `/users/{id}` | all 5 fields | `200` updated user | Full update; every required field must be present. |
+| `PATCH` | `/users/{id}` | 1+ fields | `200` updated user | Partial update. |
+| `DELETE` | `/users/{id}` | none | `204` empty | Also deletes the user's analyses. |
+
+User object:
+
+```json
+{
+  "id": 1,
+  "name": "Ali B",
+  "given_name": "Ali",
+  "family_name": "B",
+  "email": "a@x.com",
+  "role": "dev"
+}
+```
+
+### Analyses
+
+| Method | Path | Body | Success | Notes |
+|---|---|---|---|---|
+| `GET` | `/analyses` | none | `200` array of analyses | Supports `user_id`, `limit`, `offset`. |
+| `POST` | `/analyses` | `user_id` required, other fields optional | `201` created analysis + `Location: /analyses/{id}` | `created_at` is set by the server. |
+| `GET` | `/analyses/{id}` | none | `200` analysis | |
+| `PUT` | `/analyses/{id}` | `user_id` required, others optional | `200` updated analysis | Optional fields **omitted** from the body are left unchanged, not reset to `null`. Send `null` explicitly to clear one. |
+| `PATCH` | `/analyses/{id}` | 1+ fields | `200` updated analysis | Partial update. |
+| `DELETE` | `/analyses/{id}` | none | `204` empty | |
+
+Analysis object:
+
+```json
+{
+  "id": 1,
+  "user_id": 1,
+  "analysis_result": "ok",
+  "completeness": 0.8,
+  "content_quality": null,
+  "keyword_and_role_relevance": null,
+  "career_trajectory": null,
+  "skills_depth": null,
+  "social_proof": null,
+  "network": null,
+  "activity": null,
+  "created_at": "2026-11-19T20:40:16+00:00"
+}
+```
+
+### Query parameters (list endpoints)
+
+| Param | Applies to | Type | Default | Rule |
+|---|---|---|---|---|
+| `limit` | both | integer | `100` | `1`–`1000` (larger values are capped at `1000`; `< 1` → `400`) |
+| `offset` | both | integer | `0` | `>= 0` (else `400`) |
+| `user_id` | `/analyses` | integer | none | Returns only that user's analyses. Non-integer → `400`. |
+
+Results are ordered by `id` ascending.
+
+### Status codes
+
+| Code | When |
 |---|---|
-| `id` | Primary key; concrete type/format TBD |
-| `user_id` | Foreign key to `User.id`; one user can have many analyses |
-| `analysis_result` | Plain-text AI feedback |
-| `created_at` | Server-generated timestamp used to order analysis history |
-| `completeness` | Score from 0 to 100 |
-| `content_quality` | Score from 0 to 100 |
-| `keyword_and_role_relevance` | Score from 0 to 100 |
-| `career_trajectory` | Score from 0 to 100 |
-| `skills_depth` | Score from 0 to 100 |
-| `social_proof` | Score from 0 to 100 |
-| `network` | Score from 0 to 100 |
-| `activity` | Score from 0 to 100 |
+| `200` | Read or update succeeded. |
+| `201` | Created. |
+| `204` | Deleted (no body). |
+| `400` | Invalid JSON, missing body, bad `Content-Length`, empty `PATCH`, or bad `limit`/`offset`/filter. |
+| `404` | Unknown route, or no row with that id. |
+| `405` | Method not supported on that path (e.g. `DELETE /users`). |
+| `409` | Unique constraint violated (e.g. duplicate `email`). |
+| `413` | Body larger than `Config.max_body` (1 MB by default). |
+| `422` | Valid JSON but invalid content: missing/null/empty required field, wrong type, unknown field, or `user_id` that doesn't reference an existing user. |
+| `500` | Unexpected server error (details are logged to stderr, not returned). |
 
-The database diagram does not yet include `linkedin_sub`, although LinkedIn
-sign-in uses that stable identity claim to find or create an account. Add it as
-a unique user field before implementing account lookup. A server-generated
-`updated_at` is recommended for mutable records.
+---
 
-## Internal HTTP contract
+## Examples
 
-All paths below are **proposed**. They are private DB-server paths, not
-frontend routes. The gateway supplies these headers from the authenticated
-identity returned by `/api/me`:
+```bash
+B=http://127.0.0.1:8000
+H='Content-Type: application/json'
 
-```http
-X-Actor-Id: <authenticated-user-id>
-X-Actor-Role: USER
+# create a user
+curl -i -X POST $B/users -H "$H" \
+  -d '{"name":"Ali B","given_name":"Ali","family_name":"B","email":"a@x.com","role":"dev"}'
+
+# change only the role
+curl -X PATCH $B/users/1 -H "$H" -d '{"role":"admin"}'
+
+# create an analysis for that user
+curl -X POST $B/analyses -H "$H" \
+  -d '{"user_id":1,"analysis_result":"ok","completeness":0.8}'
+
+# list that user's analyses, first 10
+curl "$B/analyses?user_id=1&limit=10"
+
+# clear one score
+curl -X PATCH $B/analyses/1 -H "$H" -d '{"completeness":null}'
+
+# delete the user (and, by cascade, their analyses)
+curl -i -X DELETE $B/users/1
 ```
 
-The gateway must overwrite these values; never copy them from browser input.
-The DB server independently validates that the actor exists, that the role is
-valid, that the requested operation is allowed, and that fields are valid.
-Missing or invalid actor context is rejected. Requests also require trusted
-gateway-to-DB service authentication.
+Error examples:
 
-The required security rules are that normal user creation never assigns
-`ADMIN`, self-update cannot grant `ADMIN`, and every `PATCH` carries the
-authenticated actor's ID and role. Owner/admin read and delete permissions
-below are proposed defaults to confirm before implementation.
-
-### User CRUD
-
-#### `POST /internal/v1/users`
-
-**Request**
-
-Gateway-only account creation after LinkedIn identity verification. `role` is
-not accepted from the request; the DB server assigns `USER`.
-
-```json
-{
-  "user": {
-    "linkedin_sub": "linkedin-subject",
-    "name": "Ada Lovelace",
-    "given_name": "Ada",
-    "family_name": "Lovelace",
-    "email": "ada@example.com"
-  }
-}
+```text
+POST /users  (email already used)      → 409 {"error": "a record with this unique value already exists"}
+POST /analyses {"user_id": 99}         → 422 {"error": "user_id does not reference an existing user"}
+PUT  /users/1 {"role": "admin"}        → 422 {"error": "field 'name' is required"}
+PATCH /users/1 {"foo": 1}              → 422 {"error": "unknown field(s): foo"}
+DELETE /users                          → 405 {"error": "method not allowed"}
 ```
 
-**Response**
+---
 
-`201 Created` with the stored user, including its generated `id` and `role`.
-An existing `linkedin_sub` returns `409 Conflict`; it must not create a
-duplicate account.
+## Known limits
 
-#### `GET /internal/v1/users`
-
-**Request**
-
-No body. Requires an authenticated `ADMIN` actor.
-
-**Response**
-
-`200 OK` with the user collection. Non-admin actors receive `403 Forbidden`.
-
-#### `GET /internal/v1/users/{userId}`
-
-**Request**
-
-No body. Requires actor headers. A `USER` may read only their own record;
-`ADMIN` may read any record.
-
-**Response**
-
-`200 OK` with the user object, or `404 Not Found` when no record exists.
-
-#### `GET /internal/v1/users/by-linkedin-sub/{linkedinSub}`
-
-**Request**
-
-No body. Gateway-only lookup after the LinkedIn auth server has verified the
-identity. The subject must come from the verified LinkedIn response, never
-from an untrusted browser field.
-
-**Response**
-
-`200 OK` with the matching user, or `404 Not Found` when the account has not
-been created yet. The gateway may then create it with `POST /internal/v1/users`.
-
-#### `PATCH /internal/v1/users/{userId}`
-
-**Request**
-
-Requires both `X-Actor-Id` and `X-Actor-Role`. The gateway derives them from
-`/api/me`. The JSON body contains only fields to change:
-
-```json
-{
-  "name": "Ada Byron"
-}
-```
-
-The target ID and actor ID/role are separate: the DB server checks both before
-applying the patch. A `USER` may update only their own permitted profile
-fields. A role change requires an `ADMIN` actor targeting a different user;
-even an admin cannot change their own role through this route. The `id` and
-`linkedin_sub` fields are immutable.
-
-**Response**
-
-`200 OK` with the updated user. Invalid fields return `400 Bad Request`;
-unauthorized changes return `403 Forbidden`; missing users return
-`404 Not Found`.
-
-#### `DELETE /internal/v1/users/{userId}`
-
-**Request**
-
-No body. Requires an authenticated `ADMIN` actor. The DB server must apply its
-documented foreign-key/deletion policy for linked analyses; that policy must
-be settled before enabling this route.
-
-**Response**
-
-`204 No Content` when deleted, or `404 Not Found` when no user exists.
-
-### Analysis CRUD
-
-All analysis reads and mutations are scoped to the authenticated user. The
-gateway obtains the actor headers from `/api/me`; the DB server derives the
-record's `user_id` from that identity for creation and does not permit an
-ordinary user to transfer an analysis to another user.
-
-#### `POST /internal/v1/analyses`
-
-**Request**
-
-Requires actor headers. The gateway sends the validated AI result and metric
-scores; it does not choose the owner independently of the authenticated actor.
-
-```json
-{
-  "analysis": {
-    "analysis_result": "A concise profile assessment with recommendations.",
-    "completeness": 82,
-    "content_quality": 68,
-    "keyword_and_role_relevance": 75,
-    "career_trajectory": 70,
-    "skills_depth": 80,
-    "social_proof": 64,
-    "network": 55,
-    "activity": 72
-  }
-}
-```
-
-**Response**
-
-`201 Created` with the stored analysis, including generated `id`, the
-authenticated `user_id`, and server-generated timestamps once they are added
-to the schema. Every supplied score must be finite and between 0 and 100.
-The internal AI-to-gateway response must provide this text and the eight
-structured scores; the gateway stores the record before returning only the
-plain-text feedback from `POST /api/analyze` to the browser.
-
-#### `GET /internal/v1/analyses?limit={count}`
-
-**Request**
-
-No body. Requires actor headers. `limit` is an integer from 1 to 10 and
-defaults to 10. A `USER` receives only their own analyses; an `ADMIN` may
-request another user's records with `?user_id={userId}`.
-
-**Response**
-
-`200 OK` with up to `limit` analysis records. Results are ordered newest first
-by server-generated `created_at`. The latest record is included in the
-response; aggregation of older records is a frontend concern, not a stored
-`oldval` field.
-
-#### `GET /internal/v1/analyses/{analysisId}`
-
-**Request**
-
-No body. Requires actor headers. A `USER` may read only an analysis whose
-`user_id` matches `X-Actor-Id`; an `ADMIN` may read any analysis.
-
-**Response**
-
-`200 OK` with the analysis object, or `404 Not Found` when it does not exist.
-
-#### `PATCH /internal/v1/analyses/{analysisId}`
-
-**Request**
-
-Requires `X-Actor-Id` and `X-Actor-Role`. The body contains only fields to
-change. The DB server verifies ownership/role and validates all updated
-scores. `id` and `user_id` are immutable through this endpoint.
-
-```json
-{
-  "analysis": {
-    "content_quality": 74
-  }
-}
-```
-
-**Response**
-
-`200 OK` with the updated analysis. Invalid fields/scores return
-`400 Bad Request`, unauthorized changes return `403 Forbidden`, and missing
-records return `404 Not Found`.
-
-#### `DELETE /internal/v1/analyses/{analysisId}`
-
-**Request**
-
-No body. Requires actor headers. A user may delete only their own analysis;
-an admin may delete any analysis.
-
-**Response**
-
-`204 No Content` when deleted, or `404 Not Found` when no record exists.
-
-## Method and authorization rules
-
-- Use `POST` to create, `GET` to read, `PATCH` for partial updates, and
-  `DELETE` to delete. There are no `PUT` routes.
-- The DB server validates and enforces every mutation even after the gateway
-  checks `/api/me`; gateway checks are not a replacement for DB authorization.
-- A `POST /users` request cannot create an `ADMIN`. A `USER` cannot change
-  their own role to `ADMIN` with `PATCH`; any role change requires an `ADMIN`
-  actor and a different target user.
-- For every `PATCH`, the gateway passes the authenticated actor's ID and role.
-  The DB server checks the role, target ID, ownership, and changed fields.
-- Reject malformed payloads with `400`, missing/invalid authentication context
-  with `401`, forbidden operations with `403`, missing records with `404`, and
-  uniqueness conflicts with `409`. Return safe error bodies without secrets
-  or stack traces.
-
-## Open implementation decisions
-
-- Choose the storage engine and implement the service on configured port 3003.
-- Add `linkedin_sub` to the user entity/schema.
-- Define and validate the internal AI-to-gateway shape for text feedback plus
-  the eight score fields.
-- Confirm collection-read and delete permissions for users and analyses.
-- Decide the user-delete policy for dependent analyses and how the first
-  `ADMIN` is provisioned.
-- Implement service-to-service authentication, validation, migrations, and
-  these internal routes before treating this contract as live.
+- No authentication or authorization.
+- No CORS headers, so browsers on another origin cannot call it directly.
+- No schema migrations: changing a column means editing `SCHEMA` and `RESOURCES` and recreating or altering the database yourself.
+- One SQLite file: fine for learning and small internal use, not for heavy concurrent writes.
