@@ -5,20 +5,29 @@ Standard library only: http.server + sqlite3 + json.
 Settings are read from ../shared/config/config.json (relative to this file).
 Run:  python3 server.py
 """
+
 import json
 import re
 import sqlite3
 import sys
+import os
+import hmac
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from dotenv import load_dotenv
 
 # ../shared/config/config.json, resolved relative to this file (not the launch directory)
-CONFIG_PATH = (Path(__file__).resolve().parent / ".." / "shared" / "config" / "config.json").resolve()
-
+CONFIG_PATH = (
+    Path(__file__).resolve().parent / ".." / "shared" / "config" / "config.json"
+).resolve()
+ENV_PATH = (
+    Path(__file__).resolve().parent / ".." / "shared" / ".env"
+).resolve()
+load_dotenv(ENV_PATH, override=True)
 
 SERVICE = "db_server"  # this server's name inside the shared config
 BIND_HOST = "127.0.0.1"
@@ -48,22 +57,32 @@ class Config:
             port = data["server_port"][service]
         except (KeyError, TypeError):
             sys.exit(f"config '{path}' has no server_port.{service}")
-        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
-            sys.exit(f"config server_port.{service} must be an integer between 1 and 65535")
+        if (
+            isinstance(port, bool)
+            or not isinstance(port, int)
+            or not 1 <= port <= 65535
+        ):
+            sys.exit(
+                f"config server_port.{service} must be an integer between 1 and 65535"
+            )
         return cls(port=port)
 
 
-CFG = Config.load()  # loaded once at import time; frozen, so safe to share across threads
+CFG = (
+    Config.load()
+)  # loaded once at import time; frozen, so safe to share across threads
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS user (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    pwd          TEXT NOT NULL,
-    name        TEXT NOT NULL,
-    given_name  TEXT NOT NULL,
-    family_name TEXT NOT NULL,
-    email       TEXT NOT NULL UNIQUE,
-    role        TEXT NOT NULL
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    pwd                 TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    given_name          TEXT NOT NULL DEFAULT '',
+    family_name         TEXT NOT NULL DEFAULT '',
+    email               TEXT NOT NULL UNIQUE,
+    role                TEXT NOT NULL DEFAULT 'user',
+    linkedin_sub        TEXT UNIQUE,
+    credential_version  INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS analysis (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +100,23 @@ CREATE TABLE IF NOT EXISTS analysis (
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_user_id ON analysis(user_id);
 """
+
+
+def migrate_schema(conn):
+    """Apply additive migrations to databases created by older server versions."""
+    conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(user)")}
+    for name, declaration in {
+        "linkedin_sub": "TEXT",
+        "credential_version": "INTEGER NOT NULL DEFAULT 1",
+    }.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE user ADD COLUMN {name} {declaration}")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_linkedin_sub "
+        "ON user(linkedin_sub) WHERE linkedin_sub IS NOT NULL"
+    )
+
 
 # field -> (type, required_on_create). Whitelist: only these names ever reach SQL.
 RESOURCES = {
@@ -111,7 +147,11 @@ RESOURCES = {
             "activity": ("real", False),
         },
         "filters": {"user_id": "int"},
-        "server_set": {"created_at": lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")},
+        "server_set": {
+            "created_at": lambda: datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+        },
     },
 }
 
@@ -125,12 +165,17 @@ class HTTPError(Exception):
 
 # ---------- validation ----------
 
+
 def _check_type(field, kind, value):
     if kind == "text" and isinstance(value, str):
         return value
     if kind == "int" and isinstance(value, int) and not isinstance(value, bool):
         return value
-    if kind == "real" and isinstance(value, (int, float)) and not isinstance(value, bool):
+    if (
+        kind == "real"
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    ):
         return float(value)
     raise HTTPError(422, f"field '{field}' must be of type {kind}")
 
@@ -161,6 +206,7 @@ def validate(res, body, *, partial):
 
 
 # ---------- database ----------
+
 
 @contextmanager
 def db(path):
@@ -234,13 +280,88 @@ def delete_row(conn, res, rid):
         raise HTTPError(404, "not found")
 
 
+def auth_user_record(row):
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "password_hash": row["pwd"],
+        "credential_version": int(row["credential_version"]),
+        "display_name": row["name"],
+        "name": row["name"],
+        "role": row["role"],
+    }
+
+
+def require_service_auth(handler):
+
+    expected = os.environ.get("DB_SERVICE_TOKEN")
+
+    if not expected:
+        raise HTTPError(503, "DB_SERVICE_TOKEN is not configured")
+    scheme, _, token = handler.headers.get("Authorization", "").partition(" ")
+    if (
+        scheme.lower() != "bearer"
+        or not token
+        or not hmac.compare_digest(token, expected)
+    ):
+        raise HTTPError(401, "unauthorized")
+
+
+def validate_linkedin_signup(body):
+    if not isinstance(body, dict):
+        raise HTTPError(400, "body must be a JSON object")
+    identity = body.get("identity")
+    password_hash = body.get("password_hash")
+    if not isinstance(identity, dict):
+        raise HTTPError(422, "identity must be a JSON object")
+    for field in ("linkedin_sub", "email", "name"):
+        if not isinstance(identity.get(field), str) or not identity[field].strip():
+            raise HTTPError(422, f"identity.{field} is required")
+    if identity.get("email_verified") is not True:
+        raise HTTPError(422, "identity.email_verified must be true")
+    if not isinstance(password_hash, str) or not password_hash.strip():
+        raise HTTPError(422, "password_hash is required")
+    for field in ("given_name", "family_name"):
+        if identity.get(field) is not None and not isinstance(identity[field], str):
+            raise HTTPError(422, f"identity.{field} must be a string")
+    return identity, password_hash
+
+
+def create_linkedin_user(conn, body):
+    identity, password_hash = validate_linkedin_signup(body)
+    email = identity["email"].strip().lower()
+    name = identity["name"].strip()
+    if not email or not name:
+        raise HTTPError(422, "identity.email and identity.name cannot be empty")
+    cur = conn.execute(
+        """INSERT INTO user
+           (pwd, name, given_name, family_name, email, role, linkedin_sub, credential_version)
+           VALUES (?, ?, ?, ?, ?, 'user', ?, 1)""",
+        (
+            password_hash,
+            name,
+            (identity.get("given_name") or "").strip(),
+            (identity.get("family_name") or "").strip(),
+            email,
+            identity["linkedin_sub"],
+        ),
+    )
+    row = conn.execute("SELECT * FROM user WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return auth_user_record(row)
+
+
 # ---------- HTTP ----------
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "BdServer/1.0"
 
     def _send(self, status, payload=None, headers=None):
-        body = b"" if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = (
+            b""
+            if payload is None
+            else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        )
         self.send_response(status)
         if payload is not None:
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -266,48 +387,119 @@ class Handler(BaseHTTPRequestHandler):
             raise HTTPError(400, "invalid JSON")
 
     def handle_request(self):
+
         try:
             url = urlparse(self.path)
-            m = ROUTE.match(url.path)
+            path, method = url.path, self.command
+
+            # Private API contract used by the Node authentication repository.
+            if path.startswith("/internal/v1/"):
+
+                require_service_auth(self)
+                if path.rstrip("/") == "/internal/v1/auth/signup":
+                    if method != "POST":
+                        raise HTTPError(405, "method not allowed")
+                    with db(CFG.db) as conn:
+                        user = create_linkedin_user(conn, self._read_json())
+                    return self._send(201, {"user": user})
+
+                prefix = "/internal/v1/=/users"
+                if path.startswith(prefix + "/by-email/"):
+                    if method != "GET":
+                        raise HTTPError(405, "method not allowed")
+                    
+                    from urllib.parse import unquote
+
+                    email = unquote(path[len(prefix + "/by-email/") :])
+                    if not email:
+                        raise HTTPError(400, "email is required")
+                    with db(CFG.db) as conn:
+                        row = conn.execute(
+                            "SELECT * FROM user WHERE lower(email) = lower(?)", (email,)
+                        ).fetchone()
+                        if row is None:
+                            return self._send(404, {"error": "not found"})
+                        return self._send(200, {"user": auth_user_record(row)})
+
+                if path.startswith(prefix + "/"):
+                    if method != "GET":
+                        raise HTTPError(405, "method not allowed")
+                    raw_id = path[len(prefix) + 1 :].strip("/")
+                    if not raw_id.isdigit():
+                        raise HTTPError(400, "user id must be an integer")
+                    with db(CFG.db) as conn:
+                        row = conn.execute(
+                            "SELECT * FROM user WHERE id = ?", (int(raw_id),)
+                        ).fetchone()
+                        if row is None:
+                            return self._send(404, {"error": "not found"})
+                        return self._send(200, {"user": auth_user_record(row)})
+                raise HTTPError(404, "not found")
+
+            m = ROUTE.match(path)
             if not m:
                 raise HTTPError(404, "not found")
             res = RESOURCES[m["name"]]
             rid = int(m["id"]) if m["id"] else None
-            method = self.command
 
             with db(CFG.db) as conn:
                 if rid is None:
                     if method == "GET":
-                        return self._send(200, list_rows(conn, res, parse_qs(url.query)))
+                        return self._send(
+                            200, list_rows(conn, res, parse_qs(url.query))
+                        )
                     if method == "POST":
-                        row = create_row(conn, res, validate(res, self._read_json(), partial=False))
-                        return self._send(201, row, {"Location": f"/{m['name']}/{row['id']}"})
+                        row = create_row(
+                            conn, res, validate(res, self._read_json(), partial=False)
+                        )
+                        return self._send(
+                            201, row, {"Location": f"/{m['name']}/{row['id']}"}
+                        )
                     raise HTTPError(405, "method not allowed")
-
                 if method == "GET":
                     return self._send(200, get_row(conn, res, rid))
                 if method == "PUT":
-                    data = validate(res, self._read_json(), partial=False)
-                    return self._send(200, update_row(conn, res, rid, data))
+                    return self._send(
+                        200,
+                        update_row(
+                            conn,
+                            res,
+                            rid,
+                            validate(res, self._read_json(), partial=False),
+                        ),
+                    )
                 if method == "PATCH":
-                    data = validate(res, self._read_json(), partial=True)
-                    return self._send(200, update_row(conn, res, rid, data))
+                    return self._send(
+                        200,
+                        update_row(
+                            conn,
+                            res,
+                            rid,
+                            validate(res, self._read_json(), partial=True),
+                        ),
+                    )
                 if method == "DELETE":
                     delete_row(conn, res, rid)
                     return self._send(204)
                 raise HTTPError(405, "method not allowed")
 
         except HTTPError as e:
-            self._send(e.status, {"error": e.message})
+
+            self._send(e.status, {"error\n": e.message})
         except sqlite3.IntegrityError as e:
+
             msg = str(e)
             if "FOREIGN KEY" in msg:
-                self._send(422, {"error": "user_id does not reference an existing user"})
+                self._send(
+                    422, {"error": "user_id does not reference an existing user"}
+                )
             elif "UNIQUE" in msg:
-                self._send(409, {"error": "a record with this unique value already exists"})
+                self._send(
+                    409, {"error": "a record with this unique value already exists"}
+                )
             else:
                 self._send(409, {"error": msg})
-        except Exception as e:  # last resort: never leak a stack trace to the client
+        except Exception as e:
             print(f"internal error: {e!r}", file=sys.stderr)
             self._send(500, {"error": "internal server error"})
 
@@ -315,8 +507,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    with sqlite3.connect(CFG.db) as conn:
-        conn.executescript(SCHEMA)
+    with sqlite3.connect(CFG.db) as raw_conn:
+        raw_conn.row_factory = sqlite3.Row
+        raw_conn.execute("PRAGMA foreign_keys = ON")
+        migrate_schema(raw_conn)
     print(CFG.port)
     httpd = ThreadingHTTPServer((CFG.host, CFG.port), Handler)
     print(f"Serving on http://{CFG.host}:{CFG.port}  (db: {CFG.db})")
@@ -329,4 +523,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()

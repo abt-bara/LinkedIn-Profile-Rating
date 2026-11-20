@@ -112,11 +112,10 @@ export function createAuthService({
     }
 
     const passwordHash = await hash(password);
-    const stored = await redis.set(
-      signupKey(state),
-      passwordHash,
-      { EX: SIGNUP_TTL_SECONDS, NX: true },
-    );
+    const stored = await redis.set(signupKey(state), passwordHash, {
+      EX: SIGNUP_TTL_SECONDS,
+      NX: true,
+    });
     if (stored !== "OK") throw authError("Sign-up could not be started.", 409);
   }
 
@@ -158,6 +157,7 @@ export function createAuthService({
   async function signIn({ email, password, currentToken }) {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail || !isValidPassword(password)) {
+      
       throw authError("Incorrect email or password.", 401);
     }
 
@@ -183,7 +183,10 @@ export function createAuthService({
     }
 
     const currentTime = now();
-    if (currentTime < session.expiresAt && currentTime - session.checkedAt < ACCOUNT_REVALIDATION_MS) {
+    if (
+      currentTime < session.expiresAt &&
+      currentTime - session.checkedAt < ACCOUNT_REVALIDATION_MS
+    ) {
       return session;
     }
 
@@ -199,7 +202,10 @@ export function createAuthService({
     }
 
     const refreshed = toSession(user, currentTime, session.expiresAt);
-    const ttl = Math.max(1, Math.ceil((session.expiresAt - currentTime) / 1000));
+    const ttl = Math.max(
+      1,
+      Math.ceil((session.expiresAt - currentTime) / 1000),
+    );
     await redis.set(key, JSON.stringify(refreshed), { EX: ttl });
     return refreshed;
   }

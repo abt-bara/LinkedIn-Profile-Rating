@@ -1,7 +1,7 @@
 import config from "../../shared/config/config.json" with { type: "json" };
 
 const DB_URL = config.server_url.db_server;
-const USER_PATH = "/internal/v1/auth/users";
+const USER_PATH = "/internal/v1/=/users";
 
 function getServiceToken() {
   const token = process.env.DB_SERVICE_TOKEN;
@@ -16,6 +16,7 @@ function getServiceToken() {
 async function request(path, init = {}) {
   const response = await fetch(`${DB_URL}${path}`, {
     ...init,
+    method: "GET",
     headers: {
       authorization: `Bearer ${getServiceToken()}`,
       ...(init.body ? { "content-type": "application/json" } : {}),
@@ -51,7 +52,9 @@ function parseUser(value) {
     typeof user.credential_version !== "number" ||
     typeof user.role !== "string"
   ) {
-    const error = new Error("DB server returned an invalid authentication record.");
+    const error = new Error(
+      "DB server returned an invalid authentication record.",
+    );
     error.status = 502;
     throw error;
   }
@@ -63,7 +66,9 @@ function parseUser(value) {
         ? user.name
         : "";
   if (!displayName) {
-    const error = new Error("DB server returned an invalid authentication record.");
+    const error = new Error(
+      "DB server returned an invalid authentication record.",
+    );
     error.status = 502;
     throw error;
   }
@@ -81,9 +86,10 @@ function parseUser(value) {
 export function createUserRepository() {
   return {
     async findByEmail(email) {
-      const user = await request(
-        `${USER_PATH}/by-email/${encodeURIComponent(email)}`,
-      );
+      const p = `${USER_PATH}/by-email/${encodeURIComponent(email)}`;
+      console.log(p);
+      const user = await request(p);
+
       return user === null ? null : parseUser(user);
     },
 

@@ -98,6 +98,7 @@ function sendAuthError(res, error) {
  */
 app.get("/me", requireGateway, async (req, res) => {
   try {
+      console.log('up');
     const session = await authService.checkToken(req.cookies[SESSION_COOKIE]);
     if (!session) return res.status(401).json({ message: "Unauthorized." });
     return res

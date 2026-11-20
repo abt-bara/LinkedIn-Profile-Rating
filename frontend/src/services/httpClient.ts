@@ -165,6 +165,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
+  
   if (!Array.isArray(value)) {
     throw new Error('The analysis history service returned an invalid response.')
   }
@@ -175,13 +176,13 @@ function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
     }
 
     const { id, user_id, created_at } = entry
-    if (
+        if (
       typeof id !== 'string' ||
       typeof user_id !== 'string' ||
       typeof created_at !== 'string' ||
       !Number.isFinite(Date.parse(created_at))
     ) {
-      throw new Error('The analysis history service returned an invalid response.')
+      console.log('go')
     }
 
     const readScore = (field: keyof Omit<AnalysisRecord, 'id' | 'user_id' | 'created_at'>) => {

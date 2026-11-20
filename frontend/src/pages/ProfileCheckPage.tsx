@@ -8,141 +8,163 @@ import {
   type CSSProperties,
   type DragEvent,
   type FormEvent,
-} from 'react'
-import { useAuth } from '../auth/AuthContext'
-import { AppHeader } from '../components/AppHeader'
+} from "react";
+import { useAuth } from "../auth/AuthContext";
+import { AppHeader } from "../components/AppHeader";
 import {
   analyze,
   COLOR_MAP,
   getAnalyses,
   type AnalysisRecord,
-} from '../services/httpClient'
-import { profileService } from '../services/profileService'
+} from "../services/httpClient";
+import { profileService } from "../services/profileService";
 
 /* -------------------------------------------------------------------------- */
 /*  Config                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const DURATION_SECONDS = {
   hours: 60 * 60,
   days: 24 * 60 * 60,
   months: 30 * 24 * 60 * 60,
-} as const
-const DURATION_MAX = { hours: 6 * 30 * 24, days: 6 * 30, months: 6 } as const
-const Y_TICKS = [100, 80, 60, 40, 20, 0]
+} as const;
+const DURATION_MAX = { hours: 6 * 30 * 24, days: 6 * 30, months: 6 } as const;
+const Y_TICKS = [100, 80, 60, 40, 20, 0];
 
-const GRAPH_COLORS = Object.values(COLOR_MAP)
-const ANALYSIS_HISTORY_LIMIT = 10
+const GRAPH_COLORS = Object.values(COLOR_MAP);
+const ANALYSIS_HISTORY_LIMIT = 10;
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
 /* -------------------------------------------------------------------------- */
 
 type AnalysisMetricKey =
-  | 'completeness'
-  | 'content_quality'
-  | 'keyword_and_role_relevance'
-  | 'career_trajectory'
-  | 'skills_depth'
-  | 'social_proof'
-  | 'network'
-  | 'activity'
+  | "completeness"
+  | "content_quality"
+  | "keyword_and_role_relevance"
+  | "career_trajectory"
+  | "skills_depth"
+  | "social_proof"
+  | "network"
+  | "activity";
 
-type Metric = { key: AnalysisMetricKey; name: string; val: number; olderAverage?: number }
+type Metric = {
+  key: AnalysisMetricKey;
+  name: string;
+  val: number;
+  olderAverage?: number;
+};
 
 const METRICS: { key: AnalysisMetricKey; name: string }[] = [
-  { key: 'completeness', name: 'Completeness' },
-  { key: 'content_quality', name: 'Content quality' },
-  { key: 'keyword_and_role_relevance', name: 'Keyword and role relevance' },
-  { key: 'career_trajectory', name: 'Career trajectory' },
-  { key: 'skills_depth', name: 'Skills depth' },
-  { key: 'social_proof', name: 'Social proof' },
-  { key: 'network', name: 'Network' },
-  { key: 'activity', name: 'Activity' },
-]
+  { key: "completeness", name: "Completeness" },
+  { key: "content_quality", name: "Content quality" },
+  { key: "keyword_and_role_relevance", name: "Keyword and role relevance" },
+  { key: "career_trajectory", name: "Career trajectory" },
+  { key: "skills_depth", name: "Skills depth" },
+  { key: "social_proof", name: "Social proof" },
+  { key: "network", name: "Network" },
+  { key: "activity", name: "Activity" },
+];
 
 function clamp(value: number): number {
-  return Math.min(100, Math.max(0, value))
+  return Math.min(100, Math.max(0, value));
 }
 
 function toBarHeight(value?: number): number {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 0
-  return clamp(value)
+  if (typeof value !== "number" || Number.isNaN(value)) return 0;
+  return clamp(value);
 }
 
 function getMetricEntries(analyses: AnalysisRecord[]): Metric[] {
-  const [current, ...older] = analyses
-  if (!current) return []
+  const [current, ...older] = analyses;
+  if (!current) return [];
 
   return METRICS.map(({ key, name }) => {
-    const olderScores = older.map((analysis) => analysis[key])
+    const olderScores = older.map((analysis) => analysis[key]);
     const olderAverage = olderScores.length
-      ? olderScores.reduce((total, score) => total + score, 0) / olderScores.length
-      : undefined
+      ? olderScores.reduce((total, score) => total + score, 0) /
+        olderScores.length
+      : undefined;
 
     return {
       key,
       name,
       val: current[key],
       olderAverage,
-    }
-  })
+    };
+  });
 }
 
-function getBarStyle(metricIndex: number, barIndex: number, barCount: number): CSSProperties {
-  const color = GRAPH_COLORS[metricIndex % GRAPH_COLORS.length]
-  const opacity = barCount < 2 ? 1 : 0.55 + (barIndex / (barCount - 1)) * 0.45
-  return { backgroundColor: color, opacity }
+function getBarStyle(
+  metricIndex: number,
+  barIndex: number,
+  barCount: number,
+): CSSProperties {
+  const color = GRAPH_COLORS[metricIndex % GRAPH_COLORS.length];
+  const opacity = barCount < 2 ? 1 : 0.55 + (barIndex / (barCount - 1)) * 0.45;
+  return { backgroundColor: color, opacity };
 }
 
 function gradeFor(score: number): string {
-  if (score >= 80) return 'Strong profile'
-  if (score >= 60) return 'Solid, with room to grow'
-  if (score >= 40) return 'Developing'
-  return 'Needs attention'
+  if (score >= 80) return "Strong profile";
+  if (score >= 60) return "Solid, with room to grow";
+  if (score >= 40) return "Developing";
+  return "Needs attention";
 }
 
 function formatDelta(delta: number): string {
-  if (delta === 0) return '0'
-  return `${delta > 0 ? '+' : '−'}${Math.abs(Math.round(delta))}`
+  if (delta === 0) return "0";
+  return `${delta > 0 ? "+" : "−"}${Math.abs(Math.round(delta))}`;
 }
 
 function formatAnalysisKey(key: string): string {
   const words = key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
 
-  return words ? words[0].toUpperCase() + words.slice(1) : 'Untitled'
+  return words ? words[0].toUpperCase() + words.slice(1) : "Untitled";
 }
 
-function isAnalysisBranch(value: unknown): value is Record<string, unknown> | unknown[] {
-  return typeof value === 'object' && value !== null
+function isAnalysisBranch(
+  value: unknown,
+): value is Record<string, unknown> | unknown[] {
+  return typeof value === "object" && value !== null;
 }
 
-function AnalysisValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+function AnalysisValue({
+  value,
+  depth = 0,
+}: {
+  value: unknown;
+  depth?: number;
+}) {
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return <span className="analysis-empty">No items</span>
+      return <span className="analysis-empty">No items</span>;
     }
 
     return (
       <ol className="analysis-list">
         {value.map((item, index) => (
           <li key={index}>
-            <AnalysisEntry label={`Item ${index + 1}`} value={item} depth={depth} />
+            <AnalysisEntry
+              label={`Item ${index + 1}`}
+              value={item}
+              depth={depth}
+            />
           </li>
         ))}
       </ol>
-    )
+    );
   }
 
   if (isAnalysisBranch(value)) {
-    const entries = Object.entries(value)
+    const entries = Object.entries(value);
 
     if (entries.length === 0) {
-      return <span className="analysis-empty">No details</span>
+      return <span className="analysis-empty">No details</span>;
     }
 
     return (
@@ -151,18 +173,18 @@ function AnalysisValue({ value, depth = 0 }: { value: unknown; depth?: number })
           <AnalysisEntry key={key} label={key} value={child} depth={depth} />
         ))}
       </dl>
-    )
+    );
   }
 
-  if (value === null || typeof value === 'undefined') {
-    return <span className="analysis-empty">Not provided</span>
+  if (value === null || typeof value === "undefined") {
+    return <span className="analysis-empty">Not provided</span>;
   }
 
-  if (typeof value === 'boolean') {
-    return <span>{value ? 'Yes' : 'No'}</span>
+  if (typeof value === "boolean") {
+    return <span>{value ? "Yes" : "No"}</span>;
   }
 
-  return <span className="analysis-leaf">{String(value)}</span>
+  return <span className="analysis-leaf">{String(value)}</span>;
 }
 
 function AnalysisEntry({
@@ -170,11 +192,11 @@ function AnalysisEntry({
   value,
   depth,
 }: {
-  label: string
-  value: unknown
-  depth: number
+  label: string;
+  value: unknown;
+  depth: number;
 }) {
-  const fontSize = `${Math.max(0.76, 1.04 - depth * 0.055)}rem`
+  const fontSize = `${Math.max(0.76, 1.04 - depth * 0.055)}rem`;
 
   return (
     <div className="analysis-entry" data-depth={Math.min(depth, 8)}>
@@ -183,7 +205,7 @@ function AnalysisEntry({
         <AnalysisValue value={value} depth={depth + 1} />
       </dd>
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -191,166 +213,183 @@ function AnalysisEntry({
 /* -------------------------------------------------------------------------- */
 
 export function ProfileCheckPage() {
-  const { user } = useAuth()
-  const graphRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null)
+  const { user } = useAuth();
+  const graphRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null);
 
-  const [analyses, setAnalyses] = useState<AnalysisRecord[]>([])
-  const [graphVisible, setGraphVisible] = useState(false)
-  const [activeKey, setActiveKey] = useState<string | null>(null)
-  const [historyLoading, setHistoryLoading] = useState(true)
-  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [analyses, setAnalyses] = useState<AnalysisRecord[]>([]);
+  const [graphVisible, setGraphVisible] = useState(false);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const [pdfHelpOpen, setPdfHelpOpen] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [dragActive, setDragActive] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [analysisResult, setAnalysisResult] = useState<unknown>(null)
-  const [isResultOpen, setIsResultOpen] = useState(false)
-  const [durationAmount, setDurationAmount] = useState('24')
-  const [durationUnit, setDurationUnit] = useState<keyof typeof DURATION_SECONDS>('hours')
-  const [magicLink, setMagicLink] = useState<string | null>(null)
-  const [magicLinkLoading, setMagicLinkLoading] = useState(false)
-  const [magicLinkError, setMagicLinkError] = useState<string | null>(null)
+  const [pdfHelpOpen, setPdfHelpOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<unknown>(null);
+  const [isResultOpen, setIsResultOpen] = useState(false);
+  const [durationAmount, setDurationAmount] = useState("24");
+  const [durationUnit, setDurationUnit] =
+    useState<keyof typeof DURATION_SECONDS>("hours");
+  const [magicLink, setMagicLink] = useState<string | null>(null);
+  const [magicLinkLoading, setMagicLinkLoading] = useState(false);
+  const [magicLinkError, setMagicLinkError] = useState<string | null>(null);
 
   const loadAnalyses = useCallback(async () => {
-    setHistoryLoading(true)
-    setHistoryError(null)
+    setHistoryLoading(true);
+    setHistoryError(null);
     try {
-      const history = await getAnalyses(ANALYSIS_HISTORY_LIMIT)
-      setAnalyses(history)
-      setGraphVisible(false)
+      const history = await getAnalyses(ANALYSIS_HISTORY_LIMIT);
+      setAnalyses(history);
+      setGraphVisible(false);
     } catch (error) {
       setHistoryError(
-        error instanceof Error ? error.message : 'Could not load your analysis history.',
-      )
+        error instanceof Error
+          ? error.message
+          : "Could not load your analysis history.",
+      );
     } finally {
-      setHistoryLoading(false)
+      setHistoryLoading(false);
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
-      void loadAnalyses()
-    }, 0)
-    return () => window.clearTimeout(timerId)
-  }, [loadAnalyses])
+      void loadAnalyses();
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, [loadAnalyses]);
 
   /* ---- Animate bars when the chart scrolls into view -------------------- */
   useEffect(() => {
-    const node = graphRef.current
-    if (!node || analyses.length === 0) return
+    const node = graphRef.current;
+    if (!node || analyses.length === 0) return;
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     if (prefersReducedMotion) {
-      const id = window.setTimeout(() => setGraphVisible(true), 0)
-      return () => window.clearTimeout(id)
+      const id = window.setTimeout(() => setGraphVisible(true), 0);
+      return () => window.clearTimeout(id);
     }
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setGraphVisible(true)
-          observer.disconnect()
+          setGraphVisible(true);
+          observer.disconnect();
         }
       },
       { threshold: 0.2 },
-    )
+    );
 
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [analyses])
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [analyses]);
 
   /* ---- Close PDF help on Escape ----------------------------------------- */
   useEffect(() => {
-    if (!pdfHelpOpen) return
+    if (!pdfHelpOpen) return;
 
-    const previousFocus = document.activeElement
-    pdfHelpCloseRef.current?.focus()
+    const previousFocus = document.activeElement;
+    pdfHelpCloseRef.current?.focus();
 
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPdfHelpOpen(false)
-      } else if (event.key === 'Tab') {
-        event.preventDefault()
-        pdfHelpCloseRef.current?.focus()
+      if (event.key === "Escape") {
+        setPdfHelpOpen(false);
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        pdfHelpCloseRef.current?.focus();
       }
-    }
-    window.addEventListener('keydown', onKey)
+    };
+    window.addEventListener("keydown", onKey);
 
     return () => {
-      window.removeEventListener('keydown', onKey)
-      if (previousFocus instanceof HTMLElement) previousFocus.focus()
-    }
-  }, [pdfHelpOpen])
+      window.removeEventListener("keydown", onKey);
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+    };
+  }, [pdfHelpOpen]);
 
   /* ---- Derived ---------------------------------------------------------- */
-  const metrics = useMemo(() => getMetricEntries(analyses), [analyses])
-  const hasData = metrics.length > 0
-  const hasOlderData = analyses.length > 1
-  const firstName = user?.firstName || user?.name?.split(/\s+/)[0] || 'Friend'
+  const metrics = useMemo(() => getMetricEntries(analyses), [analyses]);
+  const hasData = metrics.length > 0;
+  const hasOlderData = analyses.length > 1;
+  const firstName = user?.firstName || user?.name?.split(/\s+/)[0] || "Friend";
 
   const totalScore = useMemo(() => {
-    if (!hasData) return 0
-    return Math.round(metrics.reduce((total, metric) => total + metric.val, 0) / metrics.length)
-  }, [metrics, hasData])
+    if (!hasData) return 0;
+    return Math.round(
+      metrics.reduce((total, metric) => total + metric.val, 0) / metrics.length,
+    );
+  }, [metrics, hasData]);
 
   const olderRating = useMemo(() => {
-    const olderMetrics = metrics.filter((metric) => typeof metric.olderAverage === 'number')
-    if (olderMetrics.length === 0) return null
+    const olderMetrics = metrics.filter(
+      (metric) => typeof metric.olderAverage === "number",
+    );
+    if (olderMetrics.length === 0) return null;
     return Math.round(
-      olderMetrics.reduce((total, metric) => total + (metric.olderAverage ?? 0), 0) /
-        olderMetrics.length,
-    )
-  }, [metrics])
+      olderMetrics.reduce(
+        (total, metric) => total + (metric.olderAverage ?? 0),
+        0,
+      ) / olderMetrics.length,
+    );
+  }, [metrics]);
 
-  const scoreDelta = olderRating === null ? null : totalScore - olderRating
-  const scoreDirection = scoreDelta === null || scoreDelta >= 0 ? 'up' : 'down'
+  const scoreDelta = olderRating === null ? null : totalScore - olderRating;
+  const scoreDirection = scoreDelta === null || scoreDelta >= 0 ? "up" : "down";
 
   const focusAreas = useMemo(
     () => [...metrics].sort((a, b) => a.val - b.val).slice(0, 2),
     [metrics],
-  )
+  );
 
-  const columns = metrics
+  const columns = metrics;
 
   /* ---- Upload ----------------------------------------------------------- */
   function handleUploadClick() {
-    inputRef.current?.click()
+    inputRef.current?.click();
   }
 
   async function processFile(file: File) {
-    if (file.type !== 'application/pdf') {
-      setUploadError('Only PDF files are supported. Export your LinkedIn profile as a PDF and try again.')
-      return
+    if (file.type !== "application/pdf") {
+      setUploadError(
+        "Only PDF files are supported. Export your LinkedIn profile as a PDF and try again.",
+      );
+      return;
     }
     if (file.size > MAX_FILE_SIZE) {
-      setUploadError('That PDF is larger than 15 MB. Export a smaller version and try again.')
-      return
+      setUploadError(
+        "That PDF is larger than 15 MB. Export a smaller version and try again.",
+      );
+      return;
     }
 
-    setUploadError(null)
-    setUploading(true)
-    setIsResultOpen(false)
+    setUploadError(null);
+    setUploading(true);
+    setIsResultOpen(false);
 
     try {
-      const result = await analyze(file)
-      setAnalysisResult(result)
-      setIsResultOpen(true)
-      await loadAnalyses()
+      const result = await analyze(file);
+      setAnalysisResult(result);
+      setIsResultOpen(true);
+      await loadAnalyses();
     } catch (error) {
       setUploadError(
-        error instanceof Error ? error.message : 'We couldn’t analyze this profile. Try again.',
-      )
+        error instanceof Error
+          ? error.message
+          : "We couldn’t analyze this profile. Try again.",
+      );
     } finally {
-      setUploading(false)
+      setUploading(false);
     }
   }
 
   async function handleMagicLinkSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const amount = Number(durationAmount)
+    event.preventDefault();
+    const amount = Number(durationAmount);
     if (
       !Number.isSafeInteger(amount) ||
       amount < 1 ||
@@ -358,42 +397,44 @@ export function ProfileCheckPage() {
     ) {
       setMagicLinkError(
         `Enter a whole number from 1 to ${DURATION_MAX[durationUnit]} ${durationUnit}.`,
-      )
-      return
+      );
+      return;
     }
 
-    setMagicLinkError(null)
-    setMagicLink(null)
-    setMagicLinkLoading(true)
+    setMagicLinkError(null);
+    setMagicLink(null);
+    setMagicLinkLoading(true);
     try {
-      const durationSeconds = amount * DURATION_SECONDS[durationUnit]
-      setMagicLink(await profileService.generateMagicLink(durationSeconds))
+      const durationSeconds = amount * DURATION_SECONDS[durationUnit];
+      setMagicLink(await profileService.generateMagicLink(durationSeconds));
     } catch (error) {
       setMagicLinkError(
-        error instanceof Error ? error.message : 'Could not generate the magic link.',
-      )
+        error instanceof Error
+          ? error.message
+          : "Could not generate the magic link.",
+      );
     } finally {
-      setMagicLinkLoading(false)
+      setMagicLinkLoading(false);
     }
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file) await processFile(file)
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) await processFile(file);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    setDragActive(false)
-    if (uploading) return
-    const file = event.dataTransfer.files?.[0]
-    if (file) void processFile(file)
+    event.preventDefault();
+    setDragActive(false);
+    if (uploading) return;
+    const file = event.dataTransfer.files?.[0];
+    if (file) void processFile(file);
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    if (!uploading) setDragActive(true)
+    event.preventDefault();
+    if (!uploading) setDragActive(true);
   }
 
   /* ---- Render ----------------------------------------------------------- */
@@ -405,19 +446,24 @@ export function ProfileCheckPage() {
           <h1>Welcome back, {firstName}</h1>
           <p className="rater-subtitle">
             {hasData
-              ? 'Here is how your profile reads to recruiters right now.'
-              : 'Upload your LinkedIn PDF to see how your profile scores.'}
+              ? "Here is how your profile reads to recruiters right now."
+              : "Upload your LinkedIn PDF to see how your profile scores."}
           </p>
         </section>
 
         {/* ------------------------------ Dashboard ------------------------------ */}
-        <section className="rater-dashboard" aria-label="Profile rating overview">
+        <section
+          className="rater-dashboard"
+          aria-label="Profile rating overview"
+        >
           {/* Chart ------------------------------------------------------------- */}
           <div className="chart-card" ref={graphRef}>
             <header className="chart-head">
               <div>
                 <h2>Profile metrics</h2>
-                <p>Current score compared with the average of earlier analyses</p>
+                <p>
+                  Current score compared with the average of earlier analyses
+                </p>
               </div>
               <ul className="chart-legend" aria-label="Legend">
                 {hasOlderData && (
@@ -435,14 +481,22 @@ export function ProfileCheckPage() {
 
             {historyError && hasData && (
               <p className="notice notice-error" role="alert">
-                Could not refresh analysis history: {historyError}{' '}
-                <button type="button" className="upload-link" onClick={() => void loadAnalyses()}>
+                Could not refresh analysis history: {historyError}{" "}
+                <button
+                  type="button"
+                  className="upload-link"
+                  onClick={() => void loadAnalyses()}
+                >
                   Retry
                 </button>
               </p>
             )}
 
-            <div className="chart" role="img" aria-label="Current profile metrics compared with the older average">
+            <div
+              className="chart"
+              role="img"
+              aria-label="Current profile metrics compared with the older average"
+            >
               {/* Y axis */}
               <div className="chart-yaxis" aria-hidden="true">
                 {Y_TICKS.map((tick) => (
@@ -456,29 +510,47 @@ export function ProfileCheckPage() {
               <div className="chart-plot">
                 <div className="chart-grid" aria-hidden="true">
                   {Y_TICKS.map((tick) => (
-                    <i key={tick} className={tick === 0 ? 'baseline' : ''} style={{ bottom: `${tick}%` }} />
+                    <i
+                      key={tick}
+                      className={tick === 0 ? "baseline" : ""}
+                      style={{ bottom: `${tick}%` }}
+                    />
                   ))}
                 </div>
 
                 <div className="chart-bars">
                   {columns.map((metric, index) => {
-                    const dim = activeKey !== null && activeKey !== metric.key
+                    const dim = activeKey !== null && activeKey !== metric.key;
                     const bars = [
-                      ...(typeof metric.olderAverage === 'number'
-                        ? [{ key: 'older', value: metric.olderAverage, className: 'bar-prev' }]
+                      ...(typeof metric.olderAverage === "number"
+                        ? [
+                            {
+                              key: "older",
+                              value: metric.olderAverage,
+                              className: "bar-prev",
+                            },
+                          ]
                         : []),
-                      { key: 'current', value: metric.val, className: 'bar-curr' },
-                    ]
+                      {
+                        key: "current",
+                        value: metric.val,
+                        className: "bar-curr",
+                      },
+                    ];
 
                     return (
                       <div
                         key={metric.key}
-                        className={`chart-col${dim ? ' is-dim' : ''}`}
+                        className={`chart-col${dim ? " is-dim" : ""}`}
                         onMouseEnter={() => setActiveKey(metric.key)}
                         onMouseLeave={() => setActiveKey(null)}
                       >
                         {bars.map((bar, barIndex) => {
-                          const colorStyle = getBarStyle(index, barIndex, bars.length)
+                          const colorStyle = getBarStyle(
+                            index,
+                            barIndex,
+                            bars.length,
+                          );
                           return (
                             <div className="bar-wrap" key={bar.key}>
                               <span className="bar-tip" style={colorStyle}>
@@ -488,15 +560,17 @@ export function ProfileCheckPage() {
                                 className={`bar ${bar.className}`}
                                 style={{
                                   ...colorStyle,
-                                  height: graphVisible ? `${toBarHeight(bar.value)}%` : '0%',
+                                  height: graphVisible
+                                    ? `${toBarHeight(bar.value)}%`
+                                    : "0%",
                                   transitionDelay: `${index * 70 + barIndex * 110}ms`,
                                 }}
                               />
                             </div>
-                          )
+                          );
                         })}
                       </div>
-                    )
+                    );
                   })}
                 </div>
 
@@ -524,7 +598,9 @@ export function ProfileCheckPage() {
                 {!historyLoading && !historyError && !hasData && (
                   <div className="chart-overlay chart-empty">
                     <strong>No scores yet</strong>
-                    <span>Upload your LinkedIn PDF to request a profile analysis.</span>
+                    <span>
+                      Upload your LinkedIn PDF to request a profile analysis.
+                    </span>
                     <button
                       type="button"
                       className="button button-primary"
@@ -539,7 +615,10 @@ export function ProfileCheckPage() {
               {/* X axis */}
               <div className="chart-xaxis">
                 {columns.map((metric) => (
-                  <span key={metric.key} className={activeKey === metric.key ? 'is-active' : ''}>
+                  <span
+                    key={metric.key}
+                    className={activeKey === metric.key ? "is-active" : ""}
+                  >
                     {metric.name}
                   </span>
                 ))}
@@ -550,11 +629,13 @@ export function ProfileCheckPage() {
           {/* Summary ----------------------------------------------------------- */}
           <aside className="summary-card" aria-label="Score summary">
             <div
-              className={`score-ring${hasData ? '' : ' is-empty'}`}
-              style={{ '--pct': hasData ? totalScore : 0 } as CSSProperties}
+              className={`score-ring${hasData ? "" : " is-empty"}`}
+              style={{ "--pct": hasData ? totalScore : 0 } as CSSProperties}
             >
               <div className="score-ring-inner">
-                <span className="score-value">{hasData ? totalScore : '—'}</span>
+                <span className="score-value">
+                  {hasData ? totalScore : "—"}
+                </span>
                 <span className="score-max">/ 100</span>
               </div>
             </div>
@@ -564,12 +645,17 @@ export function ProfileCheckPage() {
                 <p className="score-grade">{gradeFor(totalScore)}</p>
                 {scoreDelta !== null ? (
                   <p className={`score-delta ${scoreDirection}`}>
-                    <span aria-hidden="true">{scoreDirection === 'up' ? '▲' : '▼'}</span>
+                    <span aria-hidden="true">
+                      {scoreDirection === "up" ? "▲" : "▼"}
+                    </span>
                     {formatDelta(scoreDelta)} vs. older average
                     <span className="older-rating"> ({olderRating})</span>
                   </p>
                 ) : (
-                  <p className="score-grade muted">Your first analysis. An older average will appear after your next check.</p>
+                  <p className="score-grade muted">
+                    Your first analysis. An older average will appear after your
+                    next check.
+                  </p>
                 )}
 
                 <div className="focus">
@@ -597,10 +683,15 @@ export function ProfileCheckPage() {
               <h2>Breakdown</h2>
               <ul className="breakdown-list">
                 {metrics.map((m, index) => {
-                  const colorStyle = getBarStyle(index, hasOlderData ? 1 : 0, hasOlderData ? 2 : 1)
-                  const delta = typeof m.olderAverage === 'number'
-                    ? m.val - m.olderAverage
-                    : null
+                  const colorStyle = getBarStyle(
+                    index,
+                    hasOlderData ? 1 : 0,
+                    hasOlderData ? 2 : 1,
+                  );
+                  const delta =
+                    typeof m.olderAverage === "number"
+                      ? m.val - m.olderAverage
+                      : null;
 
                   return (
                     <li
@@ -613,18 +704,22 @@ export function ProfileCheckPage() {
                         <div
                           className="breakdown-fill"
                           style={{
-                            width: graphVisible ? `${toBarHeight(m.val)}%` : '0%',
+                            width: graphVisible
+                              ? `${toBarHeight(m.val)}%`
+                              : "0%",
                             ...colorStyle,
                             transitionDelay: `${index * 70}ms`,
                           }}
                         />
                       </div>
                       <b className="breakdown-value">{Math.round(m.val)}</b>
-                      <span className={`delta-chip ${delta === null ? 'flat' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
-                        {delta === null ? 'New' : formatDelta(delta)}
+                      <span
+                        className={`delta-chip ${delta === null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat"}`}
+                      >
+                        {delta === null ? "New" : formatDelta(delta)}
                       </span>
                     </li>
-                  )
+                  );
                 })}
               </ul>
             </div>
@@ -634,7 +729,7 @@ export function ProfileCheckPage() {
         {/* -------------------------------- Upload -------------------------------- */}
         <section className="rater-upload" id="upload">
           <div
-            className={`upload-panel${dragActive ? ' is-drag' : ''}${uploading ? ' is-busy' : ''}`}
+            className={`upload-panel${dragActive ? " is-drag" : ""}${uploading ? " is-busy" : ""}`}
             onDragOver={handleDragOver}
             onDragLeave={() => setDragActive(false)}
             onDrop={handleDrop}
@@ -654,10 +749,19 @@ export function ProfileCheckPage() {
             />
 
             <div className="upload-actions">
-              <button className="button button-primary" type="button" onClick={handleUploadClick} disabled={uploading}>
-                {uploading ? 'Analyzing…' : 'Upload PDF'}
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={handleUploadClick}
+                disabled={uploading}
+              >
+                {uploading ? "Analyzing…" : "Upload PDF"}
               </button>
-              <button type="button" className="upload-link" onClick={() => setPdfHelpOpen(true)}>
+              <button
+                type="button"
+                className="upload-link"
+                onClick={() => setPdfHelpOpen(true)}
+              >
                 How do I get my profile PDF?
               </button>
             </div>
@@ -669,7 +773,11 @@ export function ProfileCheckPage() {
             )}
 
             {uploading && (
-              <div className="analysis-skeleton" role="status" aria-label="Analyzing profile">
+              <div
+                className="analysis-skeleton"
+                role="status"
+                aria-label="Analyzing profile"
+              >
                 <ul className="analysis-skeleton-list" aria-hidden="true">
                   {Array.from({ length: 5 }, (_, index) => (
                     <li
@@ -710,15 +818,21 @@ export function ProfileCheckPage() {
           </div>
         </section>
 
-        {user?.role === 'admin' && (
-          <section className="admin-magic-link" aria-labelledby="magic-link-title">
+        {user?.role === "admin" && (
+          <section
+            className="admin-magic-link"
+            aria-labelledby="magic-link-title"
+          >
             <div className="admin-magic-link-copy">
               <span className="admin-label">ADMIN TOOL</span>
               <h2 id="magic-link-title">Create a magic link</h2>
               <p>Generate a temporary sign-in link with a custom expiry.</p>
             </div>
 
-            <form className="magic-link-form" onSubmit={(event) => void handleMagicLinkSubmit(event)}>
+            <form
+              className="magic-link-form"
+              onSubmit={(event) => void handleMagicLinkSubmit(event)}
+            >
               <label htmlFor="magic-link-duration">Duration</label>
               <div className="magic-link-duration">
                 <input
@@ -736,17 +850,22 @@ export function ProfileCheckPage() {
                   aria-label="Duration unit"
                   value={durationUnit}
                   onChange={(event) => {
-                    const unit = event.target.value as keyof typeof DURATION_SECONDS
-                    setDurationUnit(unit)
-                    setDurationAmount(unit === 'hours' ? '24' : '1')
+                    const unit = event.target
+                      .value as keyof typeof DURATION_SECONDS;
+                    setDurationUnit(unit);
+                    setDurationAmount(unit === "hours" ? "24" : "1");
                   }}
                 >
                   <option value="hours">Hours</option>
                   <option value="days">Days</option>
                   <option value="months">Months</option>
                 </select>
-                <button type="submit" className="button button-primary" disabled={magicLinkLoading}>
-                  {magicLinkLoading ? 'Generating…' : 'Generate link'}
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={magicLinkLoading}
+                >
+                  {magicLinkLoading ? "Generating…" : "Generate link"}
                 </button>
               </div>
               <small id="magic-link-duration-help">
@@ -760,7 +879,7 @@ export function ProfileCheckPage() {
               )}
               {magicLink && (
                 <p className="magic-link-message is-success" role="status">
-                  Magic link created:{' '}
+                  Magic link created:{" "}
                   <a href={magicLink} target="_blank" rel="noreferrer">
                     {magicLink}
                   </a>
@@ -770,7 +889,6 @@ export function ProfileCheckPage() {
           </section>
         )}
       </main>
-
       {pdfHelpOpen && (
         <div className="pdf-help-modal" onClick={() => setPdfHelpOpen(false)}>
           <div
@@ -789,14 +907,29 @@ export function ProfileCheckPage() {
             >
               ×
             </button>
+
             <span className="eyebrow">GET YOUR PROFILE PDF</span>
+
             <h2 id="pdf-help-title">Save your LinkedIn profile as a PDF</h2>
+
+            <div className="pdf-video-container">
+              <video controls playsInline preload="metadata">
+                <source src="../../linked-guide.mp4" type="video/mp4" />
+                Your browser does not support video playback.
+              </video>
+            </div>
+
             <ol>
               <li>Open your profile on LinkedIn.</li>
-              <li>Choose <strong>More</strong> in your profile introduction.</li>
-              <li>Select <strong>Save to PDF</strong>, then save the file.</li>
+              <li>
+                Choose <strong>More</strong> in your profile introduction.
+              </li>
+              <li>
+                Select <strong>Save to PDF</strong>, then save the file.
+              </li>
               <li>Return here and upload the PDF (up to 15 MB).</li>
             </ol>
+
             <p>
               Only upload a file you have permission to share. Your PDF will be
               sent to Profile Rater for analysis.
@@ -805,5 +938,5 @@ export function ProfileCheckPage() {
         </div>
       )}
     </div>
-  )
+  );
 }
