@@ -58,6 +58,7 @@ CFG = Config.load()  # loaded once at import time; frozen, so safe to share acro
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS user (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pwd          TEXT NOT NULL,
     name        TEXT NOT NULL,
     given_name  TEXT NOT NULL,
     family_name TEXT NOT NULL,
@@ -87,6 +88,7 @@ RESOURCES = {
         "table": "user",
         "fields": {
             "name": ("text", True),
+            "pwd": ("text", True),
             "given_name": ("text", True),
             "family_name": ("text", True),
             "email": ("text", True),
@@ -315,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     with sqlite3.connect(CFG.db) as conn:
         conn.executescript(SCHEMA)
-
+    print(CFG.port)
     httpd = ThreadingHTTPServer((CFG.host, CFG.port), Handler)
     print(f"Serving on http://{CFG.host}:{CFG.port}  (db: {CFG.db})")
     try:
