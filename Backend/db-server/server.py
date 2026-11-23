@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 """CRUD HTTP server for the `User` and `Analysis` tables (Bd.drawio).
 
-Standard library only: http.server + sqlite3 + json.
+Standard library only (plus python-dotenv): http.server + sqlite3 + json.
 Settings are read from ../shared/config/config.json (relative to this file).
 Run:  python3 server.py
 """
 
+import hmac
 import json
+import os
 import re
 import sqlite3
 import sys
-import os
-import hmac
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+
 from dotenv import load_dotenv
 
 # ../shared/config/config.json, resolved relative to this file (not the launch directory)
 CONFIG_PATH = (
     Path(__file__).resolve().parent / ".." / "shared" / "config" / "config.json"
 ).resolve()
-ENV_PATH = (
-    Path(__file__).resolve().parent / ".." / "shared" / ".env"
-).resolve()
+ENV_PATH = (Path(__file__).resolve().parent / ".." / "shared" / ".env").resolve()
 load_dotenv(ENV_PATH, override=True)
 
 SERVICE = "db_server"  # this server's name inside the shared config
@@ -119,6 +118,9 @@ def migrate_schema(conn):
 
 
 # field -> (type, required_on_create). Whitelist: only these names ever reach SQL.
+# Kinds: text | int | real | json
+#   json: accepted from clients as an object/array, stored as serialized TEXT,
+#         returned to clients as an object/array again.
 RESOURCES = {
     "users": {
         "table": "user",
@@ -136,7 +138,7 @@ RESOURCES = {
         "table": "analysis",
         "fields": {
             "user_id": ("int", True),
-            "analysis_result": ("text", False),
+            "analysis_result": ("json", False),
             "completeness": ("real", False),
             "content_quality": ("real", False),
             "keyword_and_role_relevance": ("real", False),
@@ -177,25 +179,39 @@ def _check_type(field, kind, value):
         and not isinstance(value, bool)
     ):
         return float(value)
-    raise HTTPError(422, f"field '{field}' must be of type {kind}")
+    if kind == "json":
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, str):
+            return value  # plain strings are still accepted (backward compatible)
+
+    raise HTTPError(
+        422,
+        f"field '{field}' must be of type "
+        f"{'a JSON object, array or string' if kind == 'json' else kind}",
+    )
 
 
 def validate(res, body, *, partial):
+
     if not isinstance(body, dict):
         raise HTTPError(400, "body must be a JSON object")
     fields = res["fields"]
     unknown = set(body) - set(fields)
     if unknown:
+
         raise HTTPError(422, f"unknown field(s): {', '.join(sorted(unknown))}")
     clean = {}
     for name, (kind, required) in fields.items():
         if name not in body:
             if required and not partial:
+
                 raise HTTPError(422, f"field '{name}' is required")
             continue
         value = body[name]
         if value is None:
             if required:
+
                 raise HTTPError(422, f"field '{name}' cannot be null")
             clean[name] = None
             continue
@@ -220,11 +236,25 @@ def db(path):
         conn.close()
 
 
+def decode_row(res, row):
+    """Turn a DB row into an API dict, expanding `json` fields back into objects."""
+    out = dict(row)
+    for name, (kind, _) in res["fields"].items():
+        if kind == "json" and isinstance(out.get(name), str):
+            try:
+                parsed = json.loads(out[name])
+            except json.JSONDecodeError:
+                continue  # legacy plain-text rows stay as strings
+            if isinstance(parsed, (dict, list)):
+                out[name] = parsed
+    return out
+
+
 def get_row(conn, res, rid):
     row = conn.execute(f"SELECT * FROM {res['table']} WHERE id = ?", (rid,)).fetchone()
     if row is None:
         raise HTTPError(404, "not found")
-    return dict(row)
+    return decode_row(res, row)
 
 
 def list_rows(conn, res, query):
@@ -247,7 +277,7 @@ def list_rows(conn, res, query):
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id LIMIT ? OFFSET ?"
-    return [dict(r) for r in conn.execute(sql, (*params, limit, offset))]
+    return [decode_row(res, r) for r in conn.execute(sql, (*params, limit, offset))]
 
 
 def create_row(conn, res, data):
@@ -407,8 +437,6 @@ class Handler(BaseHTTPRequestHandler):
                 if path.startswith(prefix + "/by-email/"):
                     if method != "GET":
                         raise HTTPError(405, "method not allowed")
-                    
-                    from urllib.parse import unquote
 
                     email = unquote(path[len(prefix + "/by-email/") :])
                     if not email:
@@ -485,11 +513,12 @@ class Handler(BaseHTTPRequestHandler):
 
         except HTTPError as e:
 
-            self._send(e.status, {"error\n": e.message})
+            self._send(e.status, {"error": e.message})
         except sqlite3.IntegrityError as e:
 
             msg = str(e)
             if "FOREIGN KEY" in msg:
+
                 self._send(
                     422, {"error": "user_id does not reference an existing user"}
                 )

@@ -87,7 +87,6 @@ export function createUserRepository() {
   return {
     async findByEmail(email) {
       const p = `${USER_PATH}/by-email/${encodeURIComponent(email)}`;
-      console.log(p);
       const user = await request(p);
 
       return user === null ? null : parseUser(user);

@@ -11,6 +11,7 @@ import {
 } from "./services/authService.js";
 import { redis, connectRedis } from "./services/redisClient.js";
 import { createUserRepository } from "./services/userRepository.js";
+import { ACTIONS, can } from "../shared/data/actions.js";
 
 const app = express();
 const ORIGIN = config.server_url.auth_server;
@@ -98,12 +99,13 @@ function sendAuthError(res, error) {
  */
 app.get("/me", requireGateway, async (req, res) => {
   try {
-      console.log('up');
+    
     const session = await authService.checkToken(req.cookies[SESSION_COOKIE]);
+
     if (!session) return res.status(401).json({ message: "Unauthorized." });
     return res
       .status(200)
-      .json({ displayName: session.displayName, role: session.role });
+      .json({ displayName: session.displayName, role: session.role, userId: session.userId });
   } catch (error) {
     return sendAuthError(res, error);
   }
@@ -206,16 +208,37 @@ app.post("/signout", requireGateway, async (req, res) => {
  *       401:
  *         description: No valid session
  */
+
+const KNOWN_ACTIONS = new Set(Object.values(ACTIONS));
+
 app.post("/authorize", requireGateway, async (req, res) => {
   try {
-    const session = await authService.checkToken(req.cookies[SESSION_COOKIE]);
+    const session = await authService.checkToken(req.cookies?.[SESSION_COOKIE]);
     if (!session) return res.status(401).json({ message: "Unauthorized." });
-    return res.status(200).json({ id: session.userId, role: session.role });
+
+    const { action, targetUserId } = req.body ?? {};
+    if (typeof action !== "string" || !KNOWN_ACTIONS.has(action)) {
+      return res.status(400).json({ message: "Unknown action." });
+    }
+
+    if (!can(session.role, action)) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    // Acting on another user's data: only the owner or an admin
+    if (
+      targetUserId !== undefined &&
+      targetUserId !== session.userId &&
+      session.role !== "admin"
+    ) {
+      return res.status(403).json({ message: "Forbidden." });
+    }
+
+    return res.status(200).json({ userId: session.userId, role: session.role });
   } catch (error) {
     return sendAuthError(res, error);
   }
 });
-
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 async function startServer() {

@@ -133,6 +133,35 @@ function isAnalysisBranch(
   return typeof value === "object" && value !== null;
 }
 
+function parseAnalysisValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function formatPrimitiveValue(value: unknown): string {
+  if (value === null || typeof value === "undefined") return "Not provided";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function getDepthScale(depth: number) {
+  const d = Math.max(0, Math.min(depth, 8));
+  return {
+    fontSize: `${Math.max(0.76, 1.04 - d * 0.05)}rem`,
+    padding: `${Math.max(8, 16 - d * 1.2)}px ${Math.max(12, 20 - d * 1.2)}px`,
+    gap: `${Math.max(6, 12 - d)}px`,
+    indent: `${d * 14}px`,
+    dotSize: `${Math.max(6, 10 - d * 0.6)}px`,
+  };
+}
+
 function AnalysisValue({
   value,
   depth = 0,
@@ -140,70 +169,189 @@ function AnalysisValue({
   value: unknown;
   depth?: number;
 }) {
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return <span className="analysis-empty">No items</span>;
+  const resolved = depth === 0 ? parseAnalysisValue(value) : value;
+  const scale = getDepthScale(depth);
+
+  if (Array.isArray(resolved)) {
+    if (resolved.length === 0) {
+      return (
+        <div
+          className="analysis-row-card"
+          style={{
+            padding: scale.padding,
+            marginLeft: scale.indent,
+            fontSize: scale.fontSize,
+          }}
+        >
+          <span className="analysis-empty">No items</span>
+        </div>
+      );
     }
 
     return (
-      <ol className="analysis-list">
-        {value.map((item, index) => (
-          <li key={index}>
-            <AnalysisEntry
-              label={`Item ${index + 1}`}
-              value={item}
-              depth={depth}
-            />
-          </li>
+      <div
+        className="analysis-card-stack"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: scale.gap,
+          marginLeft: scale.indent,
+        }}
+      >
+        {resolved.map((item, index) => (
+          <AnalysisRowCard
+            key={index}
+            label={`Item ${index + 1}`}
+            value={item}
+            depth={depth}
+            index={index}
+          />
         ))}
-      </ol>
+      </div>
     );
   }
 
-  if (isAnalysisBranch(value)) {
-    const entries = Object.entries(value);
-
+  if (isAnalysisBranch(resolved)) {
+    const entries = Object.entries(resolved);
     if (entries.length === 0) {
-      return <span className="analysis-empty">No details</span>;
+      return (
+        <div
+          className="analysis-row-card"
+          style={{
+            padding: scale.padding,
+            marginLeft: scale.indent,
+            fontSize: scale.fontSize,
+          }}
+        >
+          <span className="analysis-empty">No details</span>
+        </div>
+      );
     }
 
     return (
-      <dl className="analysis-fields">
-        {entries.map(([key, child]) => (
-          <AnalysisEntry key={key} label={key} value={child} depth={depth} />
+      <div
+        className="analysis-card-stack"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: scale.gap,
+          marginLeft: scale.indent,
+        }}
+      >
+        {entries.map(([key, child], index) => (
+          <AnalysisRowCard
+            key={key}
+            label={key}
+            value={child}
+            depth={depth}
+            index={index}
+          />
         ))}
-      </dl>
+      </div>
     );
   }
 
-  if (value === null || typeof value === "undefined") {
-    return <span className="analysis-empty">Not provided</span>;
-  }
-
-  if (typeof value === "boolean") {
-    return <span>{value ? "Yes" : "No"}</span>;
-  }
-
-  return <span className="analysis-leaf">{String(value)}</span>;
+  return (
+    <span className="analysis-leaf" style={{ fontSize: scale.fontSize }}>
+      {formatPrimitiveValue(resolved)}
+    </span>
+  );
 }
 
-function AnalysisEntry({
+function AnalysisRowCard({
   label,
   value,
   depth,
+  index,
 }: {
   label: string;
   value: unknown;
   depth: number;
+  index: number;
 }) {
-  const fontSize = `${Math.max(0.76, 1.04 - depth * 0.055)}rem`;
+  const scale = getDepthScale(depth);
+  const accent = GRAPH_COLORS[index % GRAPH_COLORS.length];
+  const isBranch = isAnalysisBranch(value);
+
+  const badgeText = useMemo(() => {
+    if (Array.isArray(value)) return `${value.length}`;
+    if (isAnalysisBranch(value)) return `${Object.keys(value).length}`;
+    if (typeof value === "number") return `${value}`;
+    return null;
+  }, [value]);
 
   return (
-    <div className="analysis-entry" data-depth={Math.min(depth, 8)}>
-      <dt style={{ fontSize }}>{formatAnalysisKey(label)}</dt>
-      <dd style={{ fontSize }}>
-        <AnalysisValue value={value} depth={depth + 1} />
-      </dd>
+    <div
+      className="analysis-row-card"
+      data-depth={Math.min(depth, 8)}
+      style={{
+        display: "flex",
+        alignItems: isBranch ? "flex-start" : "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        padding: scale.padding,
+        fontSize: scale.fontSize,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: isBranch ? "flex-start" : "center",
+          gap: "12px",
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: scale.dotSize,
+            height: scale.dotSize,
+            borderRadius: "999px",
+            backgroundColor: accent,
+            opacity: 0.75,
+            flexShrink: 0,
+            marginTop: isBranch ? "0.35em" : 0,
+          }}
+        />
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <strong style={{ fontSize: scale.fontSize }}>
+            {formatAnalysisKey(label)}
+          </strong>
+
+          {isBranch ? (
+            <AnalysisValue value={value} depth={depth + 1} />
+          ) : (
+            <span
+              className="analysis-leaf"
+              style={{ fontSize: scale.fontSize }}
+            >
+              {formatPrimitiveValue(value)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {badgeText !== null && (
+        <span
+          className="analysis-row-badge"
+          style={{
+            fontSize: `calc(${scale.fontSize} * 0.88)`,
+            flexShrink: 0,
+          }}
+        >
+          {badgeText}
+        </span>
+      )}
     </div>
   );
 }
@@ -439,9 +587,9 @@ export function ProfileCheckPage() {
 
   /* ---- Render ----------------------------------------------------------- */
   return (
-    <div className="rater-shell">
+    <div className="rater-shell" style={{ overflow: "visible", height: "auto" }}>
       <AppHeader />
-      <main className="rater-main">
+      <main className="rater-main" style={{ overflow: "visible", height: "auto" }}>
         <section className="rater-welcome">
           <h1>Welcome back, {firstName}</h1>
           <p className="rater-subtitle">
@@ -727,9 +875,14 @@ export function ProfileCheckPage() {
         </section>
 
         {/* -------------------------------- Upload -------------------------------- */}
-        <section className="rater-upload" id="upload">
+        <section
+          className="rater-upload"
+          id="upload"
+          style={{ overflow: "visible", height: "auto" }}
+        >
           <div
             className={`upload-panel${dragActive ? " is-drag" : ""}${uploading ? " is-busy" : ""}`}
+            style={{ overflow: "visible", height: "auto", maxHeight: "none" }}
             onDragOver={handleDragOver}
             onDragLeave={() => setDragActive(false)}
             onDrop={handleDrop}
@@ -796,26 +949,44 @@ export function ProfileCheckPage() {
                 </ul>
               </div>
             )}
-
-            {isResultOpen && (
-              <div className="analysis-result border-grad shadow-sm">
-                <div className="analysis-result-head">
-                  <b>Analysis result</b>
-                  <button
-                    type="button"
-                    className="result-close"
-                    onClick={() => setIsResultOpen(false)}
-                    aria-label="Close result panel"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="analysis-result-content">
-                  <AnalysisValue value={analysisResult} />
-                </div>
-              </div>
-            )}
           </div>
+
+          {isResultOpen && (
+            <div
+              className="analysis-result border-grad shadow-sm"
+   style={{
+                width: "100%",
+                maxWidth: "820px",
+                marginInline: "auto",
+                alignSelf: "center",
+                maxHeight: "none",
+                height: "auto",
+                overflow: "visible",
+              }}
+            >
+              <div className="analysis-result-head">
+                <b>Your Profile Analysis</b>
+                <button
+                  type="button"
+                  className="result-close"
+                  onClick={() => setIsResultOpen(false)}
+                  aria-label="Close result panel"
+                >
+                  ×
+                </button>
+              </div>
+              <div
+                className="analysis-result-content"
+                style={{
+                  maxHeight: "none",
+                  height: "auto",
+                  overflow: "visible",
+                }}
+              >
+                <AnalysisValue value={analysisResult} />
+              </div>
+            </div>
+          )}
         </section>
 
         {user?.role === "admin" && (
