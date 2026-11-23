@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import heroImage from "../assets/hero.png";
+import heroImage from "/hero.jpg";
 
 const features = [
   {
@@ -217,7 +217,7 @@ export function HomePage() {
               </a>
             </div>
             <div className="home-proof">
-              <span className="home-proof-mark">in</span>
+              
               <span>
                 Designed to help you tell a stronger professional story.
               </span>
