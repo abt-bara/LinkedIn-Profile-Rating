@@ -151,6 +151,41 @@ function formatPrimitiveValue(value: unknown): string {
   return String(value);
 }
 
+function entryToText(label: string, value: unknown, depth: number): string {
+  const pad = "  ".repeat(depth);
+  const title = formatAnalysisKey(label);
+  if (isAnalysisBranch(value)) {
+    return `${pad}${title}:\n${analysisToText(value, depth + 1)}`;
+  }
+  return `${pad}${title}: ${formatPrimitiveValue(value)}`;
+}
+
+function analysisToText(value: unknown, depth = 0): string {
+  const resolved = depth === 0 ? parseAnalysisValue(value) : value;
+  const pad = "  ".repeat(depth);
+
+  if (Array.isArray(resolved)) {
+    if (resolved.length === 0) return `${pad}No items`;
+    return resolved
+      .map((item, i) => entryToText(`Item ${i + 1}`, item, depth))
+      .join("\n");
+  }
+  if (isAnalysisBranch(resolved)) {
+    const entries = Object.entries(resolved);
+    if (entries.length === 0) return `${pad}No details`;
+    return entries.map(([k, v]) => entryToText(k, v, depth)).join("\n");
+  }
+  return `${pad}${formatPrimitiveValue(resolved)}`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function getDepthScale(depth: number) {
   const d = Math.max(0, Math.min(depth, 8));
   return {
@@ -378,6 +413,16 @@ export function ProfileCheckPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<unknown>(null);
   const [isResultOpen, setIsResultOpen] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   const [durationAmount, setDurationAmount] = useState("24");
   const [durationUnit, setDurationUnit] =
     useState<keyof typeof DURATION_SECONDS>("hours");
@@ -584,12 +629,51 @@ export function ProfileCheckPage() {
     event.preventDefault();
     if (!uploading) setDragActive(true);
   }
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(analysisToText(analysisResult));
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
+  }
 
+  function handleDownloadPdf() {
+    const text = escapeHtml(analysisToText(analysisResult));
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText =
+      "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+    iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8">
+<title>Profile analysis</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; padding: 32px; color: #111; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .body { white-space: pre-wrap; }
+</style></head>
+<body><h1>Your Profile Analysis</h1><div class="body">${text}</div></body></html>`;
+
+    iframe.onload = () => {
+      const win = iframe.contentWindow;
+      if (!win) return;
+      win.onafterprint = () => iframe.remove();
+      win.focus();
+      win.print();
+    };
+    document.body.appendChild(iframe);
+  }
   /* ---- Render ----------------------------------------------------------- */
   return (
-    <div className="rater-shell" style={{ overflow: "visible", height: "auto" }}>
+    <div
+      className="rater-shell"
+      style={{ overflow: "visible", height: "auto" }}
+    >
       <AppHeader />
-      <main className="rater-main" style={{ overflow: "visible", height: "auto" }}>
+      <main
+        className="rater-main"
+        style={{ overflow: "visible", height: "auto" }}
+      >
         <section className="rater-welcome">
           <h1>Welcome back, {firstName}</h1>
           <p className="rater-subtitle">
@@ -954,7 +1038,7 @@ export function ProfileCheckPage() {
           {isResultOpen && (
             <div
               className="analysis-result border-grad shadow-sm"
-   style={{
+              style={{
                 width: "100%",
                 maxWidth: "820px",
                 marginInline: "auto",
@@ -966,14 +1050,66 @@ export function ProfileCheckPage() {
             >
               <div className="analysis-result-head">
                 <b>Your Profile Analysis</b>
-                <button
-                  type="button"
-                  className="result-close"
-                  onClick={() => setIsResultOpen(false)}
-                  aria-label="Close result panel"
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
                 >
-                  ×
-                </button>
+                  <button
+                    type="button"
+                    className="upload-link"
+                    onClick={() => void handleCopy()}
+                    aria-live="polite"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    {copyState === "copied"
+                      ? "Copied ✓"
+                      : copyState === "error"
+                        ? "Copy failed"
+                        : "Copy"}
+                  </button>
+                  <button
+                    type="button"
+                    className="upload-link"
+                    onClick={handleDownloadPdf}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="result-close"
+                    onClick={() => setIsResultOpen(false)}
+                    aria-label="Close result panel"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
               <div
                 className="analysis-result-content"

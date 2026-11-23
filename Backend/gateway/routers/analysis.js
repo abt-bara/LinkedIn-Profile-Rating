@@ -121,11 +121,6 @@ router.post(
 
       // 1. Forward the file. No content-type header: fetch adds the multipart boundary.
     
-    
-      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-      await sleep(2000);
-
 
       const form = new FormData();
       form.append(
