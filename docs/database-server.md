@@ -175,6 +175,23 @@ Analysis object:
 }
 ```
 
+### Private auth-service routes
+
+The auth service uses `DB_SERVICE_TOKEN` for the private user lookup and
+LinkedIn sign-up routes. These endpoints are not browser-facing:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/internal/v1/=/users/by-email/{email}` | Find an account for local sign-in |
+| `GET` | `/internal/v1/=/users/{id}` | Revalidate a session account |
+| `POST` | `/internal/v1/auth/signup` | Persist a verified LinkedIn identity and app-password hash |
+
+The signup body contains an `identity` object (`linkedin_sub`, `email`,
+`email_verified`, `name`, and optional given/family names) plus `password_hash`.
+The DB service requires `email_verified: true`, assigns the `unpaid` role, and
+returns the created auth record. Duplicate identities or emails return `409`.
+Password hashes are returned only over the service-authenticated internal API.
+
 ### Query parameters (list endpoints)
 
 | Param | Applies to | Type | Default | Rule |
@@ -243,7 +260,8 @@ DELETE /users                          → 405 {"error": "method not allowed"}
 
 ## Known limits
 
-- No authentication or authorization.
+- Public CRUD routes do not implement authentication or authorization.
+  `/internal/v1/` auth-service routes require `DB_SERVICE_TOKEN`.
 - No CORS headers, so browsers on another origin cannot call it directly.
 - No schema migrations: changing a column means editing `SCHEMA` and `RESOURCES` and recreating or altering the database yourself.
 - One SQLite file: fine for learning and small internal use, not for heavy concurrent writes.

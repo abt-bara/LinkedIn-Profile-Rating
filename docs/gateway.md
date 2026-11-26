@@ -58,8 +58,9 @@ The gateway sends it only to the DB server as a bearer token; it is never
 returned to the browser. The DB server must be configured with the
 corresponding credential.
 
-Gateway-to-auth requests use the shared `AUTH_INTERNAL_TOKEN`; DB requests use
-`DB_SERVICE_TOKEN`. Neither credential is returned to the browser.
+Gateway-to-auth and gateway-to-LinkedIn-auth requests use the shared
+`AUTH_INTERNAL_TOKEN`; DB requests use `DB_SERVICE_TOKEN`. Neither credential
+is returned to the browser.
 
 The gateway exposes `POST /api/signup` to initiate the LinkedIn-only
 registration flow, `POST /api/signin` for email/password sign-in,

@@ -45,7 +45,7 @@ sequenceDiagram
     A->>A: Consume pending password hash from Redis
     A->>D: POST /internal/v1/auth/signup
     alt New LinkedIn account
-        D-->>A: Created user (role assigned as USER)
+        D-->>A: Created user (role assigned as unpaid)
     else Existing LinkedIn-only user
         D-->>A: App password attached to existing user
     end
@@ -60,11 +60,11 @@ Steps 1-5 and 9 pass through the **browser** (requests and redirects). Step 6 (t
 
 | Step | Check |
 |---|---|
-| 1-2 | Keep the app password in a JSON POST body, never a URL. Hash it in the auth server and store only the hash in Redis, bound to the short-lived OAuth `state`; set an `HttpOnly`, `SameSite=Lax` state cookie for this browser. Request `scope=liteprofile emailaddress w_member_social` |
+| 1-2 | Keep the app password in a JSON POST body, never a URL. Hash it in the auth server and store only the hash in Redis, bound to the short-lived OAuth `state`; set an `HttpOnly`, `SameSite=Lax` state cookie for this browser. Request OIDC scopes `openid profile email` |
 | 5 | If the callback carries `error` (`user_cancelled_login`, `user_cancelled_authorize`), stop there. Otherwise compare the returned `state` with the stored one, **use it once** (delete it after reading), and reject on a mismatch, a missing value or an expired entry (CSRF protection) |
 | 6 | Send `client_id` and `client_secret` in the **POST body** (form-encoded), only server to server, over HTTPS. Never in a URL. The code is single-use and short-lived, so exchange it immediately |
 | 7-8 | Verify the `id_token`: signature (LinkedIn JWKS, `RS256`), `iss` = `https://www.linkedin.com`, `aud` = our client ID, `exp` and `iat` |
-| 8 | The LinkedIn auth server returns verified `sub` and profile claims to the gateway. The auth server requires a verified email, consumes the pending password hash, and creates the user through the DB server with the default `USER` role. If email is missing or unverified, stop sign-up; never create a credential account with an unverified identifier. |
+| 8 | The LinkedIn auth server returns verified `sub` and profile claims to the gateway. The auth server requires a verified email, consumes the pending password hash, and creates the user through the DB server with the default `unpaid` role. If email is missing or unverified, stop sign-up; never create a credential account with an unverified identifier. |
 | 9 | Issue a **new** session id (never reuse one from before login). Cookie: `HttpOnly`, `Secure`, `SameSite=Lax`. Then redirect into the app |
 
 > [!important]
@@ -99,9 +99,7 @@ step 8.
 > - **PKCE.** Not documented for this flow. We are a confidential server-side client with a `client_secret`, so it is not required, but check before relying on it.
 > - **`localhost` redirects.** The LinkedIn docs say `HTTPS` but do not explicitly forbid `localhost`. The "public edge URL" rule above is our own decision, not a LinkedIn rule.
 
-> [!warning]
-> The requested gateway authorization URL uses `liteprofile emailaddress
-> w_member_social`, while the OIDC notes above describe `openid profile email`.
-> Confirm the LinkedIn application product and permissions support the requested
-> scopes before implementation; do not silently substitute one scope set for
-> the other. The public endpoint contract is in [[overview]].
+The implementation requests the OIDC scope set `openid profile email` so the
+LinkedIn auth server can verify the returned ID token and provide the identity
+claims required by sign-up. The LinkedIn application must have the
+*Sign In with LinkedIn using OpenID Connect* product enabled.

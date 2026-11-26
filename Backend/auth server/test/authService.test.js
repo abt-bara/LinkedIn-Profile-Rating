@@ -101,6 +101,38 @@ test("signup stores only a password hash and consumes it on verified LinkedIn co
   assert.equal(await service.checkToken(token).then((session) => session.displayName), "Ada Lovelace");
 });
 
+test("signup persists the verified user before issuing a session", async () => {
+  let createCalled = false;
+  const { redis, service } = createHarness({
+    repository: {
+      createFromLinkedIn: async () => {
+        createCalled = true;
+        throw Object.assign(new Error("database unavailable"), { status: 502 });
+      },
+    },
+  });
+  const state = "random-linkedin-state-456";
+  await service.startSignup({ state, password: "my-app-password" });
+
+  await assert.rejects(
+    service.completeSignup({
+      state,
+      identity: {
+        sub: "linkedin-sub",
+        email: "ada@example.com",
+        email_verified: true,
+        name: "Ada Lovelace",
+      },
+    }),
+    { status: 502 },
+  );
+  assert.equal(createCalled, true);
+  assert.equal(
+    [...redis.values.keys()].some((key) => key.startsWith("session:")),
+    false,
+  );
+});
+
 test("unknown email and wrong password return the same safe error", async () => {
   const { service } = createHarness({
     repository: {

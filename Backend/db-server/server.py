@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS user (
     given_name          TEXT NOT NULL DEFAULT '',
     family_name         TEXT NOT NULL DEFAULT '',
     email               TEXT NOT NULL UNIQUE,
-    role                TEXT NOT NULL DEFAULT 'user',
+    role                TEXT NOT NULL DEFAULT 'unpaid',
     linkedin_sub        TEXT UNIQUE,
     credential_version  INTEGER NOT NULL DEFAULT 1
 );
@@ -366,7 +366,7 @@ def create_linkedin_user(conn, body):
     cur = conn.execute(
         """INSERT INTO user
            (pwd, name, given_name, family_name, email, role, linkedin_sub, credential_version)
-           VALUES (?, ?, ?, ?, ?, 'user', ?, 1)""",
+           VALUES (?, ?, ?, ?, ?, 'unpaid', ?, 1)""",
         (
             password_hash,
             name,

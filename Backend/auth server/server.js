@@ -105,7 +105,7 @@ app.get("/me", requireGateway, async (req, res) => {
     if (!session) return res.status(401).json({ message: "Unauthorized." });
     return res
       .status(200)
-      .json({ displayName: session.displayName, role: session.role, userId: session.userId });
+      .json({ displayName: session.displayName, role: session.role });
   } catch (error) {
     return sendAuthError(res, error);
   }

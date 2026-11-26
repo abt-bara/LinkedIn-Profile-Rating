@@ -151,7 +151,7 @@ admin-only UI. The user ID and credential data are never returned:
 ```json
 {
   "displayName": "Ada Lovelace",
-  "role": "USER"
+  "role": "unpaid"
 }
 ```
 

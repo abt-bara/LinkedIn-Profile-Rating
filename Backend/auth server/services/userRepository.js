@@ -13,30 +13,6 @@ function getServiceToken() {
   return token;
 }
 
-async function request(path, init = {}) {
-  const response = await fetch(`${DB_URL}${path}`, {
-    ...init,
-    method: "GET",
-    headers: {
-      authorization: `Bearer ${getServiceToken()}`,
-      ...(init.body ? { "content-type": "application/json" } : {}),
-      ...init.headers,
-    },
-    redirect: "manual",
-    signal: AbortSignal.timeout(5000),
-  });
-
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    const error = new Error(`DB server request failed (${response.status}).`);
-    error.status = response.status === 409 ? 409 : 502;
-    throw error;
-  }
-
-  if (response.status === 204) return null;
-  return response.json();
-}
-
 function parseUser(value) {
   const user =
     typeof value === "object" && value !== null && "user" in value
@@ -83,7 +59,36 @@ function parseUser(value) {
   };
 }
 
-export function createUserRepository() {
+export function createUserRepository({
+  fetchImpl = fetch,
+  dbUrl = DB_URL,
+  serviceToken = getServiceToken,
+} = {}) {
+  async function request(path, init = {}) {
+    const token = serviceToken();
+    const response = await fetchImpl(`${dbUrl}${path}`, {
+      ...init,
+      method: init.method ?? "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...init.headers,
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const error = new Error(`DB server request failed (${response.status}).`);
+      error.status = response.status === 409 ? 409 : 502;
+      throw error;
+    }
+
+    if (response.status === 204) return null;
+    return response.json();
+  }
+
   return {
     async findByEmail(email) {
       const p = `${USER_PATH}/by-email/${encodeURIComponent(email)}`;

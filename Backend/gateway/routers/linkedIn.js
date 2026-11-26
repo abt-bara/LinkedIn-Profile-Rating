@@ -65,6 +65,7 @@ async function clearPendingSignup(state) {
 router.post("/signup", async (req, res) => {
   try {
     const r = await fetch(linkedin("/authflow"), {
+      headers: authHeaders(),
       signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) {
@@ -145,9 +146,9 @@ router.get("/signin/callback", async (req, res) => {
   try {
     const r = await fetch(linkedin("/callback"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(true),
       body: JSON.stringify({ code, state }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(20000),
     });
     if (!r.ok) {
       await clearPendingSignup(state);
