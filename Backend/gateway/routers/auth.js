@@ -61,7 +61,7 @@ router.get("/me", async (req, res) => {
     const r = await fetch(`${config.server_url.auth_server}/me`, {
       headers: authHeaders(req.headers.cookie),
       redirect: "manual",
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (r.status === 401) return res.status(401).json({ message: "Unauthorized." });
@@ -121,7 +121,7 @@ router.post("/signin", async (req, res) => {
       headers: authHeaders(req.headers.cookie, true),
       body: JSON.stringify(req.body ?? {}),
       redirect: "manual",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(20_000),
     });
     forwardSetCookies(r, res);
     if (r.status === 204) return res.sendStatus(204);
@@ -155,7 +155,7 @@ router.post(`/signout`, async (req, res) => {
     const r = await fetch(`${config.server_url.auth_server}/signout`, {
       method: "POST",
       headers: authHeaders(req.headers.cookie),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
       return res.status(r.status === 403 || r.status >= 500 ? 502 : r.status).json({

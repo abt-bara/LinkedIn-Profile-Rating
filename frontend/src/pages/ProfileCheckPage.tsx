@@ -9,8 +9,11 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { AppHeader } from "../components/AppHeader";
+import { AnalysisModal } from "../components/AnalysisModal";
+import { getAnalysisTitle } from "../components/analysisFormatting";
 import {
   analyze,
   COLOR_MAP,
@@ -118,96 +121,6 @@ function formatDelta(delta: number): string {
   return `${delta > 0 ? "+" : "−"}${Math.abs(Math.round(delta))}`;
 }
 
-function formatAnalysisKey(key: string): string {
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim();
-
-  return words ? words[0].toUpperCase() + words.slice(1) : "Untitled";
-}
-
-function isAnalysisBranch(
-  value: unknown,
-): value is Record<string, unknown> | unknown[] {
-  return typeof value === "object" && value !== null;
-}
-
-function AnalysisValue({
-  value,
-  depth = 0,
-}: {
-  value: unknown;
-  depth?: number;
-}) {
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return <span className="analysis-empty">No items</span>;
-    }
-
-    return (
-      <ol className="analysis-list">
-        {value.map((item, index) => (
-          <li key={index}>
-            <AnalysisEntry
-              label={`Item ${index + 1}`}
-              value={item}
-              depth={depth}
-            />
-          </li>
-        ))}
-      </ol>
-    );
-  }
-
-  if (isAnalysisBranch(value)) {
-    const entries = Object.entries(value);
-
-    if (entries.length === 0) {
-      return <span className="analysis-empty">No details</span>;
-    }
-
-    return (
-      <dl className="analysis-fields">
-        {entries.map(([key, child]) => (
-          <AnalysisEntry key={key} label={key} value={child} depth={depth} />
-        ))}
-      </dl>
-    );
-  }
-
-  if (value === null || typeof value === "undefined") {
-    return <span className="analysis-empty">Not provided</span>;
-  }
-
-  if (typeof value === "boolean") {
-    return <span>{value ? "Yes" : "No"}</span>;
-  }
-
-  return <span className="analysis-leaf">{String(value)}</span>;
-}
-
-function AnalysisEntry({
-  label,
-  value,
-  depth,
-}: {
-  label: string;
-  value: unknown;
-  depth: number;
-}) {
-  const fontSize = `${Math.max(0.76, 1.04 - depth * 0.055)}rem`;
-
-  return (
-    <div className="analysis-entry" data-depth={Math.min(depth, 8)}>
-      <dt style={{ fontSize }}>{formatAnalysisKey(label)}</dt>
-      <dd style={{ fontSize }}>
-        <AnalysisValue value={value} depth={depth + 1} />
-      </dd>
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Page                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -215,7 +128,6 @@ function AnalysisEntry({
 export function ProfileCheckPage() {
   const { user } = useAuth();
   const graphRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null);
 
   const [analyses, setAnalyses] = useState<AnalysisRecord[]>([]);
@@ -349,10 +261,6 @@ export function ProfileCheckPage() {
   const columns = metrics;
 
   /* ---- Upload ----------------------------------------------------------- */
-  function handleUploadClick() {
-    inputRef.current?.click();
-  }
-
   async function processFile(file: File) {
     if (file.type !== "application/pdf") {
       setUploadError(
@@ -436,19 +344,30 @@ export function ProfileCheckPage() {
     event.preventDefault();
     if (!uploading) setDragActive(true);
   }
-
   /* ---- Render ----------------------------------------------------------- */
   return (
-    <div className="rater-shell">
+    <div
+      className="rater-shell"
+      style={{ overflow: "visible", height: "auto" }}
+    >
       <AppHeader />
-      <main className="rater-main">
+      <main
+        className="rater-main"
+        style={{ overflow: "visible", height: "auto" }}
+      >
         <section className="rater-welcome">
-          <h1>Welcome back, {firstName}</h1>
-          <p className="rater-subtitle">
-            {hasData
-              ? "Here is how your profile reads to recruiters right now."
-              : "Upload your LinkedIn PDF to see how your profile scores."}
-          </p>
+          <div className="rater-welcome-copy">
+            <h1>Welcome back, {firstName}</h1>
+            <p className="rater-subtitle">
+              {hasData
+                ? "Here is how your profile reads to recruiters right now."
+                : "Upload your LinkedIn PDF to see how your profile scores."}
+            </p>
+          </div>
+          <Link className="analysis-history-link" to="/analysis-history">
+            <span>Past analyses</span>
+            <small>{analyses.length} recent</small>
+          </Link>
         </section>
 
         {/* ------------------------------ Dashboard ------------------------------ */}
@@ -601,13 +520,19 @@ export function ProfileCheckPage() {
                     <span>
                       Upload your LinkedIn PDF to request a profile analysis.
                     </span>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={handleUploadClick}
+                    <label
+                      className={`button button-primary upload-picker-trigger${uploading ? " is-disabled" : ""}`}
+                      aria-disabled={uploading}
                     >
                       Upload PDF
-                    </button>
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        aria-label="Upload LinkedIn profile PDF"
+                        disabled={uploading}
+                        onChange={(event) => void handleFileChange(event)}
+                      />
+                    </label>
                   </div>
                 )}
               </div>
@@ -624,6 +549,9 @@ export function ProfileCheckPage() {
                 ))}
               </div>
             </div>
+            <p className="chart-scroll-hint">
+              Swipe horizontally to see all profile metrics.
+            </p>
           </div>
 
           {/* Summary ----------------------------------------------------------- */}
@@ -727,9 +655,14 @@ export function ProfileCheckPage() {
         </section>
 
         {/* -------------------------------- Upload -------------------------------- */}
-        <section className="rater-upload" id="upload">
+        <section
+          className="rater-upload"
+          id="upload"
+          style={{ overflow: "visible", height: "auto" }}
+        >
           <div
             className={`upload-panel${dragActive ? " is-drag" : ""}${uploading ? " is-busy" : ""}`}
+            style={{ overflow: "visible", height: "auto", maxHeight: "none" }}
             onDragOver={handleDragOver}
             onDragLeave={() => setDragActive(false)}
             onDrop={handleDrop}
@@ -740,23 +673,20 @@ export function ProfileCheckPage() {
             <h2>Check your LinkedIn profile</h2>
             <p>Drop your profile PDF here, or choose a file. Max 15 MB.</p>
 
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              hidden
-              onChange={(event) => void handleFileChange(event)}
-            />
-
             <div className="upload-actions">
-              <button
-                className="button button-primary"
-                type="button"
-                onClick={handleUploadClick}
-                disabled={uploading}
+              <label
+                className={`button button-primary upload-picker-trigger${uploading ? " is-disabled" : ""}`}
+                aria-disabled={uploading}
               >
                 {uploading ? "Analyzing…" : "Upload PDF"}
-              </button>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  aria-label="Upload LinkedIn profile PDF"
+                  disabled={uploading}
+                  onChange={(event) => void handleFileChange(event)}
+                />
+              </label>
               <button
                 type="button"
                 className="upload-link"
@@ -796,27 +726,17 @@ export function ProfileCheckPage() {
                 </ul>
               </div>
             )}
-
-            {isResultOpen && (
-              <div className="analysis-result border-grad shadow-sm">
-                <div className="analysis-result-head">
-                  <b>Analysis result</b>
-                  <button
-                    type="button"
-                    className="result-close"
-                    onClick={() => setIsResultOpen(false)}
-                    aria-label="Close result panel"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="analysis-result-content">
-                  <AnalysisValue value={analysisResult} />
-                </div>
-              </div>
-            )}
           </div>
+
         </section>
+
+        {isResultOpen && (
+          <AnalysisModal
+            title={getAnalysisTitle(analysisResult) ?? "Your Profile Analysis"}
+            value={analysisResult}
+            onClose={() => setIsResultOpen(false)}
+          />
+        )}
 
         {user?.role === "admin" && (
           <section

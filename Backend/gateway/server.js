@@ -33,9 +33,9 @@ app.use(
   cors({
     origin: [
       config.server_url.frontend,
-      "http://localhost:5173",
-      "http://localhost:5174",
+      config.allowedOrigins,
     ],
+    
     credentials: true,
   }),
 );

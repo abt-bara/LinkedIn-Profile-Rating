@@ -1,6 +1,7 @@
 import { Route, Routes, Link } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
+import { AnalysisHistoryPage } from './pages/AnalysisHistoryPage'
 import { AuthPage } from './pages/AuthPage'
 import { HomePage } from './pages/HomePage'
 import { ProfileCheckPage } from './pages/ProfileCheckPage'
@@ -23,6 +24,8 @@ function App() {
         <Route path="/home" element={<HomePage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<ProfileCheckPage />} />
+          <Route path="/profile-check" element={<ProfileCheckPage />} />
+          <Route path="/analysis-history" element={<AnalysisHistoryPage />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

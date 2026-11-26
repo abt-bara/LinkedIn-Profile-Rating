@@ -28,15 +28,17 @@ These are private gateway-to-auth routes, not browser-facing endpoints:
 | Route | Purpose |
 |---|---|
 | `POST /signup` | Hash an app password and keep it in Redis under the OAuth `state` for 10 minutes |
-| `POST /signup/complete` | Consume the pending password hash, create a user from a verified LinkedIn identity through the DB service, and issue a session |
+| `POST /signup/complete` | Consume the pending password hash, persist a user from a verified LinkedIn identity through `UserRepository` and the DB service, then issue a session |
 | `DELETE /signup/{state}` | Remove pending sign-up state on cancellation/failure |
 | `POST /signin` | Find a user by normalized email, verify the password hash, and issue a session |
-| `GET /me` | Validate the browser session and return `{ "displayName": "...", "role": "USER" }` |
+| `GET /me` | Validate the browser session and return `{ "displayName": "...", "role": "unpaid" }` |
 | `POST /signout` | Revoke the session and clear its cookie |
 | `POST /authorize` | Validate the session and return only the internal user `id` and `role` for gateway authorization |
 
-Unknown users and incorrect passwords produce the same `401` response. The
-user ID, password hash, and email are not returned by `GET /me`.
+Unknown users and incorrect passwords produce the same `401` response. User
+creation must succeed before a session is issued; DB failures are reported as
+service errors and do not result in a session. The user ID, password hash, and
+email are not returned by `GET /me`.
 
 ## Redis sessions and cookies
 

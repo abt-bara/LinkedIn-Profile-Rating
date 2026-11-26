@@ -157,12 +157,12 @@ export function createAuthService({
   async function signIn({ email, password, currentToken }) {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail || !isValidPassword(password)) {
-      
       throw authError("Incorrect email or password.", 401);
     }
 
     const user = await userRepository.findByEmail(normalizedEmail);
     if (!user || !(await verify(password, user.passwordHash))) {
+      
       throw authError("Incorrect email or password.", 401);
     }
     const token = await createSession(user);

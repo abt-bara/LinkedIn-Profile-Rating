@@ -1,22 +1,13 @@
-const ACTIONS = Object.freeze({
+export const ACTIONS = Object.freeze({
   analysisCreate: "analysis:create",
   analysisList: "analysis:list",
-  signOut: "analysis:list",
+  signOut: "auth:signout",
 });
 
-class entity {
-  #analysisCreate;
-  #analysisList;
-  #signOut;
-  constructor(analysisCreate, analysisList, signOut) {
-    this.#analysisCreate = analysisCreate;
-    this.#analysisList = analysisList;
-    this.#signOut = signOut;
-  }
-}
-function Roles() {
-  const admin = entity.freeze(true, true, true);
-  const paid = entity.freeze(true, true, true);
-  const unpaid = entity.freeze(false, true, true);
-}
-export { ACTIONS, entity, Roles };
+const ROLES = Object.freeze({
+  admin:  new Set(Object.values(ACTIONS)),
+  paid:   new Set(Object.values(ACTIONS)),
+  unpaid: new Set([ACTIONS.analysisList, ACTIONS.signOut]),
+});
+
+export const can = (role, action) => ROLES[role]?.has(action) ?? false;

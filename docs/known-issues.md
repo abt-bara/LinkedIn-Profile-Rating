@@ -11,19 +11,22 @@ Part of [[overview]].
 
 ## 1. `Request failed (502)` on "Continue with LinkedIn"
 
-**Where:** login page ([[frontend]]). **Meaning:** a *502 Bad Gateway* means the first server (the nginx edge, or the [[gateway]]) got no valid answer from the next one.
+**Where:** login page ([[frontend]]). **Meaning:** the public API endpoint or
+hosting layer could not get a valid response from the [[gateway]] or one of its
+downstream services. A dedicated edge server and tunnel are not part of the
+current setup.
 
-Debug from the outside in:
+Debug the active request path:
 
-- [ ] Is the **tunnel** up? Check the SSH or tunnel process on the local machine.
-- [ ] Does the **edge port** respond on the edge host? `curl -i http://127.0.0.1:8080/` there.
-- [ ] Does nginx `proxy_pass` point to that same port? Check the nginx error log.
-- [ ] Is the **gateway** really listening on the local port (`ss -ltnp | grep 3001`)?
+- [ ] Is the frontend configured with the correct API URL for the **gateway**?
+- [ ] Is the **gateway** running and listening on its configured port (default `3001`)?
 - [ ] Does the gateway reach the [[linkedin-auth-server]]? Check its logs for connection errors.
 - [ ] Is the `/api/signin` route proxied to the right upstream?
 
 > [!tip]
-> Test each hop separately with `curl`, from the inside out: service → gateway → tunnel port on the edge → public URL. The first hop that fails is the culprit.
+> Test the active path with `curl`, from the inside out: downstream service →
+> gateway → frontend's configured API URL. The first failing hop is the
+> culprit. In local development, Vite forwards `/api` requests to the gateway.
 
 ## 2. Secret exposure
 
@@ -45,10 +48,8 @@ A screenshot showed part of the LinkedIn client secret. Rotate it. See [[linkedi
 - [ ] Privacy policy URL on the LinkedIn app (also needed for a real launch)
 - [ ] App verification against the company page
 - [ ] "How do I get my profile PDF?" content
-- [ ] Friendly error page when the tunnel is down
 - [ ] Response schema (Pydantic) for the AI output
 - [ ] Implement the DB server and its private CRUD routes; see [[database-server]]
 
 ## Links
 - MDN, 502 Bad Gateway: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/502
-- nginx troubleshooting (error log): https://docs.nginx.com/nginx/admin-guide/monitoring/logging/

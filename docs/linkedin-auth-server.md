@@ -7,7 +7,7 @@ created: 2026-11-12
 
 # LinkedIn Auth Server
 
-Part of [[architecture]]. Folder: `Backend/LinkedIn-auth-server`.
+Part of [[overview]]. Folder: `Backend/linkedIn-auth-server`.
 
 ## Purpose
 
@@ -15,10 +15,10 @@ Ensures the **one-time LinkedIn sign-up identity check** works: it runs the auth
 
 ## Responsibilities
 
-1. Build the LinkedIn authorize URL with a fresh `state` (and `nonce`).
-2. Handle the LinkedIn callback forwarded by the gateway: validate `state`, reject on mismatch or LinkedIn error.
+1. Build the LinkedIn authorize parameters with a fresh, random `state`.
+2. Handle the callback forwarded by the gateway. The gateway compares the callback state with its short-lived, HTTP-only state cookie before forwarding it.
 3. Exchange the `code` for tokens (server to server, with the client secret).
-4. Verify the `id_token`.
+4. Verify the `id_token` signature using the LinkedIn JWKS and validate `iss` (`https://www.linkedin.com/oauth`), `aud`, `exp`, `iat`, and `sub`. If required profile claims are omitted, fetch UserInfo with the access token and require a matching `sub`.
 5. Return the verified identity (`sub`, name, email, `email_verified`) to the gateway. The gateway asks the auth server to complete sign-up; the auth server handles DB persistence and session creation.
 
 ## LinkedIn endpoints
@@ -30,18 +30,41 @@ Ensures the **one-time LinkedIn sign-up identity check** works: it runs the auth
 | Userinfo | `https://api.linkedin.com/v2/userinfo` |
 | Discovery | `https://www.linkedin.com/oauth/.well-known/openid-configuration` |
 
-Requested authorization scopes: `liteprofile emailaddress w_member_social` (URL-encoded in the authorization request). Enable the corresponding LinkedIn products and permissions for the application.
+Requested authorization scopes: `openid profile email` (URL-encoded in the authorization request). These OIDC scopes are required for the verified `id_token` claims used by this application.
+
+The LinkedIn auth server exposes private `GET /authflow` and `POST /callback`
+routes to the gateway. Both require the shared `AUTH_INTERNAL_TOKEN` bearer
+credential. The gateway validates the browser's state cookie; the LinkedIn auth
+server validates that callback parameters are well-formed and verifies the
+identity token.
+
+The service publishes its OpenAPI 3.1 document at `/api-docs.json` and Swagger
+UI at `/api-docs`. The specification describes the public health endpoint and
+the gateway-authenticated internal endpoints; it does not contain credentials.
+Swagger keeps the private callback operation documentation-only: do not submit
+callback codes from the UI. Codes are single-use, and only the gateway callback
+completes state validation, user persistence, and session creation.
 
 ## Configuration (environment)
 
 ```bash
 LINKEDIN_CLIENT_ID=...
 LINKEDIN_CLIENT_SECRET=...        # never commit; see linkedin-app-setup
-LINKEDIN_REDIRECT_URI=https://<edge-domain>/api/signin/callback
+LINKEDIN_REDIRECT_URI=http://localhost:4173/api/signin/callback
+AUTH_INTERNAL_TOKEN=...           # shared with the gateway
 ```
 
 > [!warning]
 > Keep secrets in `.env` (git-ignored) and commit only `.env.example`.
+
+For local development, the auth server accepts HTTP only for loopback
+redirects (`localhost`, `127.0.0.1`, or `[::1]`). Production must use the
+exact HTTPS callback URL registered with LinkedIn.
+
+The token request is form-encoded and sent only server-to-server. The client
+secret and provider tokens must never appear in URLs, browser responses, or
+logs. The auth server does not retain LinkedIn access tokens after identity
+verification.
 
 ## Identity data returned (OIDC claims)
 

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import heroImage from "../assets/hero.png";
+import heroImage from "/hero.jpg";
 import { authService } from "../services/authService";
 
 const LOGIN_ERRORS: Record<string, string> = {
@@ -10,7 +10,7 @@ const LOGIN_ERRORS: Record<string, string> = {
   session_expired: "Your sign-in session expired. Please start again.",
   account_exists: "This LinkedIn account is already registered. Sign in instead.",
   verified_email_required:
-    "Sign-up requires a verified email address on your LinkedIn account.",
+    "LinkedIn did not provide the verified email and profile details required to create your account. Verify your email on LinkedIn and try again.",
   signup_failed: "We couldn't complete sign-up. Please try again.",
 };
 

@@ -14,7 +14,7 @@ A web application for reviewing LinkedIn profiles. The frontend is built with Re
 - [LinkedIn Auth Server](./docs/linkedin-auth-server.md): LinkedIn OAuth/OIDC flow.
 - [AI Server](./docs/ai-server.md): profile analysis and scoring.
 - [DB Server](./docs/database-server.md): planned private HTTP service for `User` and `Analysis` CRUD; its port and implementation are not yet assigned.
-- [Edge Server](./docs/edge-server.md): public HTTPS reverse proxy and tunnel; not a data service.
+- [Legacy Edge Server](./docs/edge-server.md): the former nginx-and-tunnel setup; a separate edge server is no longer required.
 
 ### Git branches:
 

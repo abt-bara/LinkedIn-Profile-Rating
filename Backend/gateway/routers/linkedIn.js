@@ -33,7 +33,7 @@ async function clearPendingSignup(state) {
     const response = await fetch(authServer(`/signup/${encodeURIComponent(state)}`), {
       method: "DELETE",
       headers: authHeaders(),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) {
       console.error(`Could not clear pending sign-up (${response.status}).`);
@@ -65,7 +65,8 @@ async function clearPendingSignup(state) {
 router.post("/signup", async (req, res) => {
   try {
     const r = await fetch(linkedin("/authflow"), {
-      signal: AbortSignal.timeout(5000),
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
       return res.status(502).json({ message: "LinkedIn sign-up is unavailable." });
@@ -82,7 +83,7 @@ router.post("/signup", async (req, res) => {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ state: params.state, password: req.body?.password }),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!stored.ok) {
       const body = await stored.json().catch(() => null);
@@ -130,6 +131,13 @@ router.get("/signin/callback", async (req, res) => {
   res.clearCookie(STATE_COOKIE, STATE_COOKIE_OPTIONS); // single use, whatever happens next
 
   if (typeof state !== "string" || !expected || state !== expected) {
+    const reason =
+      typeof state !== "string"
+        ? "missing_callback_state"
+        : !expected
+          ? "missing_state_cookie"
+          : "state_mismatch";
+    console.warn("LinkedIn callback state validation failed.", { reason });
     await clearPendingSignup(expected);
     return res.redirect("/auth?error=login_failed");
   }
@@ -138,6 +146,7 @@ router.get("/signin/callback", async (req, res) => {
     return res.redirect("/auth?error=access_denied");
   }
   if (typeof code !== "string") {
+    console.warn("LinkedIn callback rejected.", { reason: "missing_code" });
     await clearPendingSignup(state);
     return res.redirect("/auth?error=login_failed");
   }
@@ -145,13 +154,28 @@ router.get("/signin/callback", async (req, res) => {
   try {
     const r = await fetch(linkedin("/callback"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(true),
       body: JSON.stringify({ code, state }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
+      const body = await r.json().catch(() => null);
+      const profileUnavailable =
+        r.status === 400 &&
+        body?.message ===
+          "LinkedIn sign-up requires a verified email address and profile name.";
+      console.error("LinkedIn callback identity verification failed.", {
+        status: r.status,
+        reason: profileUnavailable
+          ? "verified_profile_unavailable"
+          : "service_rejected",
+      });
       await clearPendingSignup(state);
-      return res.redirect("/auth?error=login_failed");
+      return res.redirect(
+        profileUnavailable
+          ? "/auth?error=verified_email_required"
+          : "/auth?error=login_failed",
+      );
     }
 
     const identity = await r.json();
@@ -159,7 +183,7 @@ router.get("/signin/callback", async (req, res) => {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ state, identity }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!completed.ok) {
       const body = await completed.json().catch(() => null);
@@ -210,7 +234,7 @@ router.get("/check-token", async (req, res) => {
     const r = await fetch(linkedin("/check-token"), {
       method: "POST",
       headers: { cookie: req.headers.cookie ?? "" },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (r.status === 401) return res.status(401).json({ error: "Unauthorized" });
