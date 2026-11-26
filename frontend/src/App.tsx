@@ -23,6 +23,7 @@ function App() {
         <Route path="/home" element={<HomePage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<ProfileCheckPage />} />
+          <Route path="/profile-check" element={<ProfileCheckPage />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

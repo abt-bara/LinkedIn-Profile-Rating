@@ -398,7 +398,6 @@ function AnalysisRowCard({
 export function ProfileCheckPage() {
   const { user } = useAuth();
   const graphRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const pdfHelpCloseRef = useRef<HTMLButtonElement | null>(null);
 
   const [analyses, setAnalyses] = useState<AnalysisRecord[]>([]);
@@ -542,10 +541,6 @@ export function ProfileCheckPage() {
   const columns = metrics;
 
   /* ---- Upload ----------------------------------------------------------- */
-  function handleUploadClick() {
-    inputRef.current?.click();
-  }
-
   async function processFile(file: File) {
     if (file.type !== "application/pdf") {
       setUploadError(
@@ -833,13 +828,19 @@ export function ProfileCheckPage() {
                     <span>
                       Upload your LinkedIn PDF to request a profile analysis.
                     </span>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      onClick={handleUploadClick}
+                    <label
+                      className={`button button-primary upload-picker-trigger${uploading ? " is-disabled" : ""}`}
+                      aria-disabled={uploading}
                     >
                       Upload PDF
-                    </button>
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        aria-label="Upload LinkedIn profile PDF"
+                        disabled={uploading}
+                        onChange={(event) => void handleFileChange(event)}
+                      />
+                    </label>
                   </div>
                 )}
               </div>
@@ -977,23 +978,20 @@ export function ProfileCheckPage() {
             <h2>Check your LinkedIn profile</h2>
             <p>Drop your profile PDF here, or choose a file. Max 15 MB.</p>
 
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              hidden
-              onChange={(event) => void handleFileChange(event)}
-            />
-
             <div className="upload-actions">
-              <button
-                className="button button-primary"
-                type="button"
-                onClick={handleUploadClick}
-                disabled={uploading}
+              <label
+                className={`button button-primary upload-picker-trigger${uploading ? " is-disabled" : ""}`}
+                aria-disabled={uploading}
               >
                 {uploading ? "Analyzing…" : "Upload PDF"}
-              </button>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  aria-label="Upload LinkedIn profile PDF"
+                  disabled={uploading}
+                  onChange={(event) => void handleFileChange(event)}
+                />
+              </label>
               <button
                 type="button"
                 className="upload-link"
