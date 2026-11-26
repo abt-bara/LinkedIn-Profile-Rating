@@ -225,6 +225,7 @@ router.get("/analyses", authorize(ACTIONS.analysisList), async (req, res) => {
     const targetUrl = new URL(`${config.server_url.db_server}/analyses`);
     targetUrl.searchParams.set("user_id", req.user.userId);
     targetUrl.searchParams.set("limit", String(limit));
+    targetUrl.searchParams.set("order", "desc");
 
     const dbRes = await callService(
       "db",

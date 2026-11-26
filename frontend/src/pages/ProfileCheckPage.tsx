@@ -9,8 +9,11 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { AppHeader } from "../components/AppHeader";
+import { AnalysisModal } from "../components/AnalysisModal";
+import { getAnalysisTitle } from "../components/analysisFormatting";
 import {
   analyze,
   COLOR_MAP,
@@ -118,279 +121,6 @@ function formatDelta(delta: number): string {
   return `${delta > 0 ? "+" : "−"}${Math.abs(Math.round(delta))}`;
 }
 
-function formatAnalysisKey(key: string): string {
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim();
-
-  return words ? words[0].toUpperCase() + words.slice(1) : "Untitled";
-}
-
-function isAnalysisBranch(
-  value: unknown,
-): value is Record<string, unknown> | unknown[] {
-  return typeof value === "object" && value !== null;
-}
-
-function parseAnalysisValue(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return value;
-  }
-}
-
-function formatPrimitiveValue(value: unknown): string {
-  if (value === null || typeof value === "undefined") return "Not provided";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  return String(value);
-}
-
-function entryToText(label: string, value: unknown, depth: number): string {
-  const pad = "  ".repeat(depth);
-  const title = formatAnalysisKey(label);
-  if (isAnalysisBranch(value)) {
-    return `${pad}${title}:\n${analysisToText(value, depth + 1)}`;
-  }
-  return `${pad}${title}: ${formatPrimitiveValue(value)}`;
-}
-
-function analysisToText(value: unknown, depth = 0): string {
-  const resolved = depth === 0 ? parseAnalysisValue(value) : value;
-  const pad = "  ".repeat(depth);
-
-  if (Array.isArray(resolved)) {
-    if (resolved.length === 0) return `${pad}No items`;
-    return resolved
-      .map((item, i) => entryToText(`Item ${i + 1}`, item, depth))
-      .join("\n");
-  }
-  if (isAnalysisBranch(resolved)) {
-    const entries = Object.entries(resolved);
-    if (entries.length === 0) return `${pad}No details`;
-    return entries.map(([k, v]) => entryToText(k, v, depth)).join("\n");
-  }
-  return `${pad}${formatPrimitiveValue(resolved)}`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function getDepthScale(depth: number) {
-  const d = Math.max(0, Math.min(depth, 8));
-  return {
-    fontSize: `${Math.max(0.76, 1.04 - d * 0.05)}rem`,
-    padding: `${Math.max(8, 16 - d * 1.2)}px ${Math.max(12, 20 - d * 1.2)}px`,
-    gap: `${Math.max(6, 12 - d)}px`,
-    indent: `${d * 14}px`,
-    dotSize: `${Math.max(6, 10 - d * 0.6)}px`,
-  };
-}
-
-function AnalysisValue({
-  value,
-  depth = 0,
-}: {
-  value: unknown;
-  depth?: number;
-}) {
-  const resolved = depth === 0 ? parseAnalysisValue(value) : value;
-  const scale = getDepthScale(depth);
-
-  if (Array.isArray(resolved)) {
-    if (resolved.length === 0) {
-      return (
-        <div
-          className="analysis-row-card"
-          style={{
-            padding: scale.padding,
-            marginLeft: scale.indent,
-            fontSize: scale.fontSize,
-          }}
-        >
-          <span className="analysis-empty">No items</span>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="analysis-card-stack"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: scale.gap,
-          marginLeft: scale.indent,
-        }}
-      >
-        {resolved.map((item, index) => (
-          <AnalysisRowCard
-            key={index}
-            label={`Item ${index + 1}`}
-            value={item}
-            depth={depth}
-            index={index}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (isAnalysisBranch(resolved)) {
-    const entries = Object.entries(resolved);
-    if (entries.length === 0) {
-      return (
-        <div
-          className="analysis-row-card"
-          style={{
-            padding: scale.padding,
-            marginLeft: scale.indent,
-            fontSize: scale.fontSize,
-          }}
-        >
-          <span className="analysis-empty">No details</span>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="analysis-card-stack"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: scale.gap,
-          marginLeft: scale.indent,
-        }}
-      >
-        {entries.map(([key, child], index) => (
-          <AnalysisRowCard
-            key={key}
-            label={key}
-            value={child}
-            depth={depth}
-            index={index}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <span className="analysis-leaf" style={{ fontSize: scale.fontSize }}>
-      {formatPrimitiveValue(resolved)}
-    </span>
-  );
-}
-
-function AnalysisRowCard({
-  label,
-  value,
-  depth,
-  index,
-}: {
-  label: string;
-  value: unknown;
-  depth: number;
-  index: number;
-}) {
-  const scale = getDepthScale(depth);
-  const accent = GRAPH_COLORS[index % GRAPH_COLORS.length];
-  const isBranch = isAnalysisBranch(value);
-
-  const badgeText = useMemo(() => {
-    if (Array.isArray(value)) return `${value.length}`;
-    if (isAnalysisBranch(value)) return `${Object.keys(value).length}`;
-    if (typeof value === "number") return `${value}`;
-    return null;
-  }, [value]);
-
-  return (
-    <div
-      className="analysis-row-card"
-      data-depth={Math.min(depth, 8)}
-      style={{
-        display: "flex",
-        alignItems: isBranch ? "flex-start" : "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        padding: scale.padding,
-        fontSize: scale.fontSize,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: isBranch ? "flex-start" : "center",
-          gap: "12px",
-          flex: 1,
-          minWidth: 0,
-        }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            width: scale.dotSize,
-            height: scale.dotSize,
-            borderRadius: "999px",
-            backgroundColor: accent,
-            opacity: 0.75,
-            flexShrink: 0,
-            marginTop: isBranch ? "0.35em" : 0,
-          }}
-        />
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px",
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          <strong style={{ fontSize: scale.fontSize }}>
-            {formatAnalysisKey(label)}
-          </strong>
-
-          {isBranch ? (
-            <AnalysisValue value={value} depth={depth + 1} />
-          ) : (
-            <span
-              className="analysis-leaf"
-              style={{ fontSize: scale.fontSize }}
-            >
-              {formatPrimitiveValue(value)}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {badgeText !== null && (
-        <span
-          className="analysis-row-badge"
-          style={{
-            fontSize: `calc(${scale.fontSize} * 0.88)`,
-            flexShrink: 0,
-          }}
-        >
-          {badgeText}
-        </span>
-      )}
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Page                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -412,16 +142,6 @@ export function ProfileCheckPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<unknown>(null);
   const [isResultOpen, setIsResultOpen] = useState(false);
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
-    "idle",
-  );
-  const copyTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-    };
-  }, []);
   const [durationAmount, setDurationAmount] = useState("24");
   const [durationUnit, setDurationUnit] =
     useState<keyof typeof DURATION_SECONDS>("hours");
@@ -624,40 +344,6 @@ export function ProfileCheckPage() {
     event.preventDefault();
     if (!uploading) setDragActive(true);
   }
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(analysisToText(analysisResult));
-      setCopyState("copied");
-    } catch {
-      setCopyState("error");
-    }
-    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
-  }
-
-  function handleDownloadPdf() {
-    const text = escapeHtml(analysisToText(analysisResult));
-    const iframe = document.createElement("iframe");
-    iframe.style.cssText =
-      "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
-    iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8">
-<title>Profile analysis</title>
-<style>
-  body { font: 14px/1.6 system-ui, sans-serif; padding: 32px; color: #111; }
-  h1 { font-size: 20px; margin: 0 0 16px; }
-  .body { white-space: pre-wrap; }
-</style></head>
-<body><h1>Your Profile Analysis</h1><div class="body">${text}</div></body></html>`;
-
-    iframe.onload = () => {
-      const win = iframe.contentWindow;
-      if (!win) return;
-      win.onafterprint = () => iframe.remove();
-      win.focus();
-      win.print();
-    };
-    document.body.appendChild(iframe);
-  }
   /* ---- Render ----------------------------------------------------------- */
   return (
     <div
@@ -670,12 +356,18 @@ export function ProfileCheckPage() {
         style={{ overflow: "visible", height: "auto" }}
       >
         <section className="rater-welcome">
-          <h1>Welcome back, {firstName}</h1>
-          <p className="rater-subtitle">
-            {hasData
-              ? "Here is how your profile reads to recruiters right now."
-              : "Upload your LinkedIn PDF to see how your profile scores."}
-          </p>
+          <div className="rater-welcome-copy">
+            <h1>Welcome back, {firstName}</h1>
+            <p className="rater-subtitle">
+              {hasData
+                ? "Here is how your profile reads to recruiters right now."
+                : "Upload your LinkedIn PDF to see how your profile scores."}
+            </p>
+          </div>
+          <Link className="analysis-history-link" to="/analysis-history">
+            <span>Past analyses</span>
+            <small>{analyses.length} recent</small>
+          </Link>
         </section>
 
         {/* ------------------------------ Dashboard ------------------------------ */}
@@ -857,6 +549,9 @@ export function ProfileCheckPage() {
                 ))}
               </div>
             </div>
+            <p className="chart-scroll-hint">
+              Swipe horizontally to see all profile metrics.
+            </p>
           </div>
 
           {/* Summary ----------------------------------------------------------- */}
@@ -1033,95 +728,15 @@ export function ProfileCheckPage() {
             )}
           </div>
 
-          {isResultOpen && (
-            <div
-              className="analysis-result border-grad shadow-sm"
-              style={{
-                width: "100%",
-                maxWidth: "820px",
-                marginInline: "auto",
-                alignSelf: "center",
-                maxHeight: "none",
-                height: "auto",
-                overflow: "visible",
-              }}
-            >
-              <div className="analysis-result-head">
-                <b>Your Profile Analysis</b>
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
-                >
-                  <button
-                    type="button"
-                    className="upload-link"
-                    onClick={() => void handleCopy()}
-                    aria-live="polite"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                    {copyState === "copied"
-                      ? "Copied ✓"
-                      : copyState === "error"
-                        ? "Copy failed"
-                        : "Copy"}
-                  </button>
-                  <button
-                    type="button"
-                    className="upload-link"
-                    onClick={handleDownloadPdf}
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Download PDF
-                  </button>
-                  <button
-                    type="button"
-                    className="result-close"
-                    onClick={() => setIsResultOpen(false)}
-                    aria-label="Close result panel"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div
-                className="analysis-result-content"
-                style={{
-                  maxHeight: "none",
-                  height: "auto",
-                  overflow: "visible",
-                }}
-              >
-                <AnalysisValue value={analysisResult} />
-              </div>
-            </div>
-          )}
         </section>
+
+        {isResultOpen && (
+          <AnalysisModal
+            title={getAnalysisTitle(analysisResult) ?? "Your Profile Analysis"}
+            value={analysisResult}
+            onClose={() => setIsResultOpen(false)}
+          />
+        )}
 
         {user?.role === "admin" && (
           <section

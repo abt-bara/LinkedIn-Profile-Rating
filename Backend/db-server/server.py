@@ -273,10 +273,13 @@ def list_rows(conn, res, query):
         raise HTTPError(400, "limit/offset must be integers")
     if limit < 1 or offset < 0:
         raise HTTPError(400, "limit must be >= 1 and offset must be >= 0")
+    order = query.get("order", ["asc"])[0].lower()
+    if order not in ("asc", "desc"):
+        raise HTTPError(400, "order must be asc or desc")
     sql = f"SELECT * FROM {res['table']}"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY id LIMIT ? OFFSET ?"
+    sql += f" ORDER BY id {order.upper()} LIMIT ? OFFSET ?"
     return [decode_row(res, r) for r in conn.execute(sql, (*params, limit, offset))]
 
 

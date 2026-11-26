@@ -11,8 +11,9 @@ Part of [[overview]].
 
 ## Purpose
 
-The gateway is the application's only public backend API. The edge server
-forwards browser traffic to it; internal service ports are not exposed to the
+The gateway is the application's only public backend API. The browser connects
+to it over HTTPS; a separate edge server, nginx reverse proxy, or tunnel is not
+required by the application. Internal service ports are not exposed to the
 browser. The gateway routes and coordinates requests to the auth,
 LinkedIn-auth, AI, and DB servers.
 
@@ -51,7 +52,7 @@ browser-facing request and response remain the `/api/analyze` contract in
 
 The frontend's Vite proxy defaults to the gateway at `http://localhost:3001`.
 The DB server uses a different, private port (`3003` in the shared config). Do
-not proxy the DB port through Vite or the edge server.
+not proxy the DB port through Vite or expose it publicly.
 
 The analysis routes require `DB_SERVICE_TOKEN` in the gateway environment.
 The gateway sends it only to the DB server as a bearer token; it is never

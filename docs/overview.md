@@ -28,15 +28,18 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  U[Browser<br/>React SPA] -->|HTTPS| E[Edge server<br/>nginx - public]
-  E ==>|tunnel| G
+  U[Browser<br/>React SPA] -->|HTTPS API requests| G
+  G[Gateway<br/>Express - public API]
   subgraph P[Private network]
-    G[Gateway<br/>Express]
-    G --> A[Auth server<br/>sessions and identity]
-    G --> L[LinkedIn auth server]
-    G --> AI[AI server<br/>FastAPI, local LLM, RAG]
-    G --> DB[DB server<br/>private HTTP CRUD<br/>port 3003 configured]
+    A[Auth server<br/>sessions and identity]
+    L[LinkedIn auth server]
+    AI[AI server<br/>FastAPI, local LLM, RAG]
+    DB[DB server<br/>private HTTP CRUD<br/>port 3003 configured]
   end
+  G --> A
+  G --> L
+  G --> AI
+  G --> DB
   L <-->|OAuth 2.0 / OIDC| LI[(LinkedIn)]
 ```
 
@@ -45,7 +48,6 @@ flowchart LR
 | Component            | Folder                         | Role                                                                             | Doc                                             |
 | -------------------- | ------------------------------ | -------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Frontend             | `frontend/`                    | React SPA: login, dashboard, upload                                              | [Frontend](frontend.md)                         |
-| Edge server          | `Backend/edge server`          | Public nginx that exposes the local app to the internet                          | [Edge server](edge-server.md)                   |
 | Gateway              | `Backend/gateway`              | Single entry point; orchestrates the private servers                             | [Gateway](gateway.md)                           |
 | Auth server          | `Backend/auth server`          | Session lifecycle and authenticated identity (`/api/me`)                        | [Auth server](auth-server.md)                   |
 | LinkedIn auth server | `Backend/LinkedIn-auth-server` | Sign-in/up flow with LinkedIn, state verification and validation                 | [LinkedIn auth server](linkedin-auth-server.md) |
@@ -61,7 +63,6 @@ flowchart LR
 | AI                           | Python, FastAPI, local LLM, RAG            |
 | Database API                 | Separate HTTP service; port 3003 configured; implementation pending |
 | Data                         | `User` and `Analysis` entities; storage engine TBD |
-| Edge                         | nginx plus a tunnel to localhost           |
 | Identity                     | LinkedIn OAuth 2.0 authorization-code flow |
 
 ## Repository layout
@@ -72,7 +73,7 @@ flowchart LR
 │   ├── ai server/
 │   ├── auth server/
 │   ├── db server/       <- planned separate process; port 3003 configured
-│   ├── edge server/
+│   ├── edge server/     <- legacy; no longer required
 │   ├── gateway/
 │   └── LinkedIn-auth-server/
 ├── docs/                 <- you are here

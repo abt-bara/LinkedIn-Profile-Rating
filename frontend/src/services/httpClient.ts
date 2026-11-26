@@ -10,6 +10,7 @@ export type AnalysisRecord = {
   social_proof: number;
   network: number;
   activity: number;
+  analysis_result?: unknown;
 };
 
 export const COLOR_MAP = {
@@ -186,7 +187,10 @@ function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
     const user_id = String(entry.user_id);
     const created_at = String(entry.created_at);
     const readScore = (
-      field: keyof Omit<AnalysisRecord, "id" | "user_id" | "created_at">,
+      field: Exclude<
+        keyof AnalysisRecord,
+        "id" | "user_id" | "created_at" | "analysis_result"
+      >,
     ) => {
       const score = entry[field];
       if (
@@ -214,6 +218,7 @@ function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
       social_proof: readScore("social_proof"),
       network: readScore("network"),
       activity: readScore("activity"),
+      analysis_result: entry.analysis_result,
     };
   });
 }
