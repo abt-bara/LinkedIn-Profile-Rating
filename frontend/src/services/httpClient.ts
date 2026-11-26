@@ -182,8 +182,9 @@ function parseAnalysisHistory(value: unknown): AnalysisRecord[] {
       );
     }
 
-    const { id, user_id, created_at } = entry;
-
+    const id = String(entry.id);
+    const user_id = String(entry.user_id);
+    const created_at = String(entry.created_at);
     const readScore = (
       field: keyof Omit<AnalysisRecord, "id" | "user_id" | "created_at">,
     ) => {
