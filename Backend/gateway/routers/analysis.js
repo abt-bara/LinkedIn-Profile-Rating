@@ -16,7 +16,7 @@ class UpstreamError extends Error {
   }
 }
 
-async function callService(service, url, options = {}, timeoutMs = 10000) {
+async function callService(service, url, options = {}, timeoutMs = 20_000) {
   try {
     return await fetch(url, {
       ...options,
@@ -133,7 +133,7 @@ router.post(
         "analysis",
         `${config.server_url.ai_server}/analyze`,
         { method: "POST", body: form },
-        30000,
+        20_000,
       );
       if ([400, 415, 422].includes(aiRes.status)) {
         return res
@@ -233,7 +233,7 @@ router.get("/analyses", authorize(ACTIONS.analysisList), async (req, res) => {
         method: "GET",
         headers: internalHeaders(req.headers.cookie ?? ""),
       },
-      30000,
+      20_000,
     );
     if (!dbRes.ok) {
       console.error("db service status:", dbRes.status);

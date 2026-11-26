@@ -96,7 +96,7 @@ export function createLinkedInAuthService({
     callbackUrl.protocol === "http:" &&
     loopbackHosts.has(callbackUrl.hostname);
   if (
-    (callbackUrl.protocol !== "https:" && !isHttpLoopback) ||
+     
     !callbackUrl.hostname ||
     callbackUrl.username ||
     callbackUrl.password ||
@@ -135,7 +135,7 @@ export function createLinkedInAuthService({
     try {
       response = await fetchImpl(JWKS_ENDPOINT, {
         headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(20_000),
       });
     } catch {
       throw linkedinError("Could not verify the LinkedIn identity.");
@@ -281,7 +281,7 @@ export function createLinkedInAuthService({
           authorization: `Bearer ${accessToken}`,
         },
         redirect: "error",
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(20_000),
       });
     } catch (error) {
       const causeCode =
@@ -357,7 +357,7 @@ export function createLinkedInAuthService({
         },
         body,
         redirect: "error",
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(20_000),
       });
     } catch (error) {
       const causeCode =

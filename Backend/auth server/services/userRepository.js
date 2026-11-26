@@ -75,7 +75,7 @@ export function createUserRepository({
         ...init.headers,
       },
       redirect: "manual",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (response.status === 404) return null;

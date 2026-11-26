@@ -33,7 +33,7 @@ async function clearPendingSignup(state) {
     const response = await fetch(authServer(`/signup/${encodeURIComponent(state)}`), {
       method: "DELETE",
       headers: authHeaders(),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) {
       console.error(`Could not clear pending sign-up (${response.status}).`);
@@ -66,7 +66,7 @@ router.post("/signup", async (req, res) => {
   try {
     const r = await fetch(linkedin("/authflow"), {
       headers: authHeaders(),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
       return res.status(502).json({ message: "LinkedIn sign-up is unavailable." });
@@ -83,7 +83,7 @@ router.post("/signup", async (req, res) => {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ state: params.state, password: req.body?.password }),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!stored.ok) {
       const body = await stored.json().catch(() => null);
@@ -156,7 +156,7 @@ router.get("/signin/callback", async (req, res) => {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ code, state }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) {
       const body = await r.json().catch(() => null);
@@ -183,7 +183,7 @@ router.get("/signin/callback", async (req, res) => {
       method: "POST",
       headers: authHeaders(true),
       body: JSON.stringify({ state, identity }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!completed.ok) {
       const body = await completed.json().catch(() => null);
@@ -234,7 +234,7 @@ router.get("/check-token", async (req, res) => {
     const r = await fetch(linkedin("/check-token"), {
       method: "POST",
       headers: { cookie: req.headers.cookie ?? "" },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (r.status === 401) return res.status(401).json({ error: "Unauthorized" });

@@ -366,7 +366,7 @@ def create_linkedin_user(conn, body):
     cur = conn.execute(
         """INSERT INTO user
            (pwd, name, given_name, family_name, email, role, linkedin_sub, credential_version)
-           VALUES (?, ?, ?, ?, ?, 'unpaid', ?, 1)""",
+           VALUES (?, ?, ?, ?, ?, 'paid', ?, 1)""",
         (
             password_hash,
             name,

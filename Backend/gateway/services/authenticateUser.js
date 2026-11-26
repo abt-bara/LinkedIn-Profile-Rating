@@ -1,6 +1,6 @@
 import config from "../../shared/config/config.json" with { type: "json" };
 
-const AUTH_TIMEOUT_MS = 3000;
+const AUTH_TIMEOUT_MS = 20_000;
 const GATEWAY_REJECTED_MESSAGE = "Gateway authentication failed.";
 
 const MESSAGES = {
