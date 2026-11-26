@@ -131,6 +131,13 @@ router.get("/signin/callback", async (req, res) => {
   res.clearCookie(STATE_COOKIE, STATE_COOKIE_OPTIONS); // single use, whatever happens next
 
   if (typeof state !== "string" || !expected || state !== expected) {
+    const reason =
+      typeof state !== "string"
+        ? "missing_callback_state"
+        : !expected
+          ? "missing_state_cookie"
+          : "state_mismatch";
+    console.warn("LinkedIn callback state validation failed.", { reason });
     await clearPendingSignup(expected);
     return res.redirect("/auth?error=login_failed");
   }
@@ -139,6 +146,7 @@ router.get("/signin/callback", async (req, res) => {
     return res.redirect("/auth?error=access_denied");
   }
   if (typeof code !== "string") {
+    console.warn("LinkedIn callback rejected.", { reason: "missing_code" });
     await clearPendingSignup(state);
     return res.redirect("/auth?error=login_failed");
   }
@@ -151,8 +159,23 @@ router.get("/signin/callback", async (req, res) => {
       signal: AbortSignal.timeout(20000),
     });
     if (!r.ok) {
+      const body = await r.json().catch(() => null);
+      const profileUnavailable =
+        r.status === 400 &&
+        body?.message ===
+          "LinkedIn sign-up requires a verified email address and profile name.";
+      console.error("LinkedIn callback identity verification failed.", {
+        status: r.status,
+        reason: profileUnavailable
+          ? "verified_profile_unavailable"
+          : "service_rejected",
+      });
       await clearPendingSignup(state);
-      return res.redirect("/auth?error=login_failed");
+      return res.redirect(
+        profileUnavailable
+          ? "/auth?error=verified_email_required"
+          : "/auth?error=login_failed",
+      );
     }
 
     const identity = await r.json();

@@ -6,6 +6,7 @@ import { createLinkedInAuthService } from "../services/linkedinAuthService.js";
 const CLIENT_ID = "test-client-id";
 const CLIENT_SECRET = "test-client-secret";
 const REDIRECT_URI = "https://profiles.example.com/api/signin/callback";
+const USERINFO_ENDPOINT = "https://api.linkedin.com/v2/userinfo";
 const NOW = 1_800_000_000_000;
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
@@ -25,7 +26,7 @@ function makeIdToken(claimOverrides = {}, signingKey = privateKey) {
   ).toString("base64url");
   const claims = Buffer.from(
     JSON.stringify({
-      iss: "https://www.linkedin.com",
+      iss: "https://www.linkedin.com/oauth",
       aud: CLIENT_ID,
       sub: "linkedin-sub-1",
       name: "Ada Lovelace",
@@ -45,22 +46,38 @@ function makeIdToken(claimOverrides = {}, signingKey = privateKey) {
   return `${input}.${signature}`;
 }
 
-function createService({ idToken = makeIdToken(), onTokenRequest } = {}) {
+function createService({
+  idToken = makeIdToken(),
+  onTokenRequest,
+  redirectUri = REDIRECT_URI,
+  tokenResponse,
+  userinfoResponse,
+  onUserInfoRequest,
+  logger = { error() {}, warn() {} },
+} = {}) {
   const fetchImpl = async (url, init) => {
     if (url === "https://www.linkedin.com/oauth/openid/jwks") {
       return Response.json({ keys: [jwk] });
     }
     if (url === "https://www.linkedin.com/oauth/v2/accessToken") {
       onTokenRequest?.(url, init);
-      return Response.json({ access_token: "unused", id_token: idToken });
+      return (
+        tokenResponse ??
+        Response.json({ access_token: "unused", id_token: idToken })
+      );
+    }
+    if (url === USERINFO_ENDPOINT) {
+      onUserInfoRequest?.(url, init);
+      return Response.json(userinfoResponse);
     }
     throw new Error(`Unexpected LinkedIn endpoint: ${url}`);
   };
   return createLinkedInAuthService({
     clientId: CLIENT_ID,
     clientSecret: CLIENT_SECRET,
-    redirectUri: REDIRECT_URI,
+    redirectUri,
     fetchImpl,
+    logger,
     now: () => NOW,
     makeState: () => "state-value-that-is-long-enough",
   });
@@ -75,6 +92,35 @@ test("authorization parameters use OIDC scopes and fresh state", () => {
     state: "state-value-that-is-long-enough",
     scope: "openid profile email",
   });
+});
+
+test("allows HTTP loopback redirects outside production only", () => {
+  const redirectUri = "http://localhost:3001/api/signin/callback";
+  const service = createService({ redirectUri });
+  assert.equal(
+    service.getAuthorizationParameters().redirect_uri,
+    redirectUri,
+  );
+
+  assert.throws(
+    () =>
+      createLinkedInAuthService({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: "http://profiles.example.com/api/signin/callback",
+      }),
+    /HTTPS/,
+  );
+  assert.throws(
+    () =>
+      createLinkedInAuthService({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri,
+        allowHttpLoopback: false,
+      }),
+    /HTTPS/,
+  );
 });
 
 test("callback exchanges code server-side and returns verified identity claims", async () => {
@@ -114,18 +160,150 @@ test("callback exchanges code server-side and returns verified identity claims",
   });
 });
 
+test("fills optional ID-token profile claims using subject-bound UserInfo", async () => {
+  let userinfoRequest;
+  const service = createService({
+    idToken: makeIdToken({ email: undefined, email_verified: undefined }),
+    tokenResponse: Response.json({
+      access_token: "test-access-token",
+      id_token: makeIdToken({
+        email: undefined,
+        email_verified: undefined,
+      }),
+    }),
+    userinfoResponse: {
+      sub: "linkedin-sub-1",
+      email: "ada@example.com",
+      email_verified: true,
+    },
+    onUserInfoRequest: (url, init) => {
+      userinfoRequest = { url, init };
+    },
+  });
+
+  const identity = await service.completeAuthorization({
+    code: "authorization-code",
+    state: "state-value-that-is-long-enough",
+  });
+
+  assert.equal(userinfoRequest.url, USERINFO_ENDPOINT);
+  assert.equal(
+    userinfoRequest.init.headers.authorization,
+    "Bearer test-access-token",
+  );
+  assert.equal(userinfoRequest.init.method, undefined);
+  assert.deepEqual(identity, {
+    sub: "linkedin-sub-1",
+    name: "Ada Lovelace",
+    given_name: "Ada",
+    family_name: "Lovelace",
+    email: "ada@example.com",
+    email_verified: true,
+  });
+});
+
+test("rejects UserInfo responses for a different LinkedIn subject", async () => {
+  const service = createService({
+    idToken: makeIdToken({ email: undefined, email_verified: undefined }),
+    tokenResponse: Response.json({
+      access_token: "test-access-token",
+      id_token: makeIdToken({
+        email: undefined,
+        email_verified: undefined,
+      }),
+    }),
+    userinfoResponse: {
+      sub: "different-linkedin-sub",
+      email: "ada@example.com",
+      email_verified: true,
+    },
+  });
+
+  await assert.rejects(
+    service.completeAuthorization({
+      code: "authorization-code",
+      state: "state-value-that-is-long-enough",
+    }),
+    { status: 502 },
+  );
+});
+
+test("still rejects profiles without an email verified by LinkedIn", async () => {
+  const service = createService({
+    idToken: makeIdToken({ email: undefined, email_verified: undefined }),
+    tokenResponse: Response.json({
+      access_token: "test-access-token",
+      id_token: makeIdToken({
+        email: undefined,
+        email_verified: undefined,
+      }),
+    }),
+    userinfoResponse: {
+      sub: "linkedin-sub-1",
+      name: "Ada Lovelace",
+      email_verified: true,
+    },
+  });
+
+  await assert.rejects(
+    service.completeAuthorization({
+      code: "authorization-code",
+      state: "state-value-that-is-long-enough",
+    }),
+    {
+      status: 400,
+      message:
+        "LinkedIn sign-up requires a verified email address and profile name.",
+    },
+  );
+});
+
+test("token endpoint failures log safe diagnostics without raw provider descriptions", async () => {
+  const logs = [];
+  const service = createService({
+    tokenResponse: Response.json(
+      {
+        error: "invalid_grant",
+        error_description: "The redirect_uri does not match the request.",
+      },
+      { status: 400 },
+    ),
+    logger: { error: (...args) => logs.push(args) },
+  });
+
+  await assert.rejects(
+    service.completeAuthorization({
+      code: "authorization-code",
+      state: "state-value-that-is-long-enough",
+    }),
+    { status: 502, message: "Could not complete LinkedIn sign-up." },
+  );
+  assert.deepEqual(logs, [
+    [
+      "LinkedIn token exchange rejected.",
+      {
+        status: 400,
+        reason: "redirect_uri_mismatch",
+        providerError: "invalid_grant",
+      },
+    ],
+  ]);
+  assert.equal(JSON.stringify(logs).includes("does not match"), false);
+});
+
 test("callback rejects invalid issuer, audience, and expired ID tokens", async (t) => {
   const cases = [
-    ["issuer", { iss: "https://attacker.example" }],
-    ["audience", { aud: "another-client" }],
+    ["issuer", { iss: "https://www.linkedin.com" }, "issuer"],
+    ["audience", { aud: "another-client" }, "audience"],
     [
       "multiple audiences without authorized party",
       { aud: [CLIENT_ID, "another-client"] },
+      "authorized party",
     ],
-    ["expiry", { exp: Math.floor(NOW / 1000) }],
+    ["expiry", { exp: Math.floor(NOW / 1000) }, "expiration"],
   ];
 
-  for (const [label, claims] of cases) {
+  for (const [label, claims, failedCheck] of cases) {
     await t.test(label, async () => {
       const service = createService({ idToken: makeIdToken(claims) });
       await assert.rejects(
@@ -133,7 +311,8 @@ test("callback rejects invalid issuer, audience, and expired ID tokens", async (
           code: "authorization-code",
           state: "state-value-that-is-long-enough",
         }),
-        { status: 502 },
+        (error) =>
+          error.status === 502 && error.message.includes(failedCheck),
       );
     });
   }

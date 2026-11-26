@@ -21,6 +21,24 @@ test("LinkedIn routes require the gateway token", async (t) => {
 
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  const specificationResponse = await fetch(`${baseUrl}/api-docs.json`);
+  assert.equal(specificationResponse.status, 200);
+  const specification = await specificationResponse.json();
+  assert.equal(specification.openapi, "3.1.0");
+  assert.ok(specification.paths["/authflow"].get.security);
+  assert.ok(specification.paths["/callback"].post.requestBody);
+  assert.match(specification.paths["/callback"].post.description, /single-use/);
+  assert.ok(specification.paths["/health"].get);
+
+  const docsResponse = await fetch(`${baseUrl}/api-docs`);
+  assert.equal(docsResponse.status, 200);
+  assert.match(docsResponse.headers.get("content-type"), /text\/html/);
+  const swaggerConfigResponse = await fetch(
+    `${baseUrl}/api-docs/swagger-ui-init.js`,
+  );
+  assert.equal(swaggerConfigResponse.status, 200);
+  assert.match(await swaggerConfigResponse.text(), /supportedSubmitMethods/);
+
   const unauthorized = await fetch(`${baseUrl}/authflow`);
   assert.equal(unauthorized.status, 403);
 
